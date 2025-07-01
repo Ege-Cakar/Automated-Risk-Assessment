@@ -19,6 +19,10 @@ load_dotenv()
 approved_experts = []
 captured_expert_names: Set[str] = set()
 output_file = "text_files/approved_experts.json"
+# Reset output file to empty JSON array
+with open(output_file, "w") as f:
+    f.write("[]")
+
 
 organization_client = OpenAIChatCompletionClient(
     model="o4-mini",
@@ -57,7 +61,7 @@ expert_tracker = ExpertTracker()
 
 team = RoundRobinGroupChat(
     [organizer_agent, organizer_critic_agent], 
-    termination_condition=CombinedTerminationCondition(expert_tracker=expert_tracker)
+    termination_condition=TextMentionTermination(text="EXPERT GENERATION DONE", sources=["organizer"])
 )
 
 async def main():
@@ -78,14 +82,14 @@ async def main():
     # Create the task request string
     task = f"""Generate a team of experts for risk assessment based on the following:
 
-User Request: {dummy_req}
+    User Request: {dummy_req}
 
-Information on SWIFT steps: {swift_info}
+    Information on SWIFT steps: {swift_info}
 
-You will have access to relevant data to help with keyword generation and expert identification.
-"""
+    You will have access to relevant data to help with keyword generation and expert identification.
+    """
     await Console(team.run_stream(task=task))  # Stream the messages to the console.
 
-    await team.close()
+    # await team.close() # No need when using Console wrapper
 
 asyncio.run(main())

@@ -19,41 +19,42 @@ class CombinedTerminationCondition(FunctionalTermination):
         super().__init__(func=self.is_terminated)
 
     def is_terminated(self, messages: Sequence[BaseAgentEvent | BaseChatMessage]) -> bool:
-            # Process any new messages for expert tracking
-            self.expert_tracker.process_new_messages(messages)
-            
-            if len(messages) < 2:
-                return False
-            
-            # Look for the most recent organizer plain text "DONE" message
-            latest_done_index = -1
-            
-            for i, message in enumerate(messages):
-                if (hasattr(message, 'source') and message.source == "organizer" and 
-                    hasattr(message, 'content')):
-                    
-                    content = message.content
-                    
-                    # Check for plain text "DONE" message (not tool response)
-                    if isinstance(content, str) and content.strip().upper() == "DONE":
-                        latest_done_index = i
-            
-            # If organizer never sent plain text "DONE", we can't terminate
-            if latest_done_index == -1:
-                return False
-            
-            # Now look for critic approval AFTER the organizer said "DONE"
-            for i in range(latest_done_index + 1, len(messages)):
-                message = messages[i]
-                if (hasattr(message, 'source') and message.source == "organizer_critic" and
-                    hasattr(message, 'content')):
-                    
-                    critic_content = str(message.content).upper()
-                    if "APPROVED" in critic_content:
-                        return True
-            
-            # Organizer said "DONE" but critic hasn't approved yet
+        # Process any new messages for expert tracking
+        self.expert_tracker.process_new_messages(messages)
+        
+        if len(messages) < 2:
             return False
+        
+        # Look for the most recent organizer message containing "DONE"
+        latest_done_index = -1
+        
+        for i, message in enumerate(messages):
+            if (hasattr(message, 'source') and message.source == "organizer" and 
+                hasattr(message, 'content')):
+                
+                content = str(message.content).upper()
+                
+                # Check if message contains "DONE" (not a tool response)
+                if "DONE" in content and not hasattr(message.content, 'done'):
+                    latest_done_index = i
+        
+        # If organizer never said "DONE", we can't terminate  
+        if latest_done_index == -1:
+            return False
+        
+        # Look for critic "APPROVED" AFTER the most recent "DONE"
+        for i in range(latest_done_index + 1, len(messages)):
+            message = messages[i]
+            if (hasattr(message, 'source') and message.source == "organizer_critic" and
+                hasattr(message, 'content')):
+                
+                critic_content = str(message.content).upper()
+                if "APPROVED" in critic_content:
+                    print(f"TERMINATION: Found DONE at index {latest_done_index}, APPROVED at index {i}")
+                    return True
+        
+        print(f"TERMINATION: Found DONE at index {latest_done_index}, but no APPROVED after it")
+        return False
 
 
     async def reset(self):
