@@ -73,5 +73,7 @@ async def quick_start():
 
 
 if __name__ == "__main__":
+
+    
     # Run the example
     asyncio.run(quick_start())
