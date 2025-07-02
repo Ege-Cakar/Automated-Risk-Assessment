@@ -2,7 +2,7 @@ import asyncio
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.conditions import ExternalTermination, TextMentionTermination
-from autogen_agentchat.teams import RoundRobinGroupChat
+from autogen_agentchat.teams import RoundRobinGroupChat, SelectorGroupChat
 from autogen_agentchat.ui import Console
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.memory.chromadb import ChromaDBVectorMemory, PersistentChromaDBVectorMemoryConfig
@@ -18,6 +18,7 @@ load_dotenv()
 # Storage
 approved_experts = []
 captured_expert_names: Set[str] = set()
+
 output_file = "text_files/approved_experts.json"
 # Reset output file to empty JSON array
 with open(output_file, "w") as f:
@@ -47,25 +48,18 @@ organizer_critic_agent = AssistantAgent(
 )
 
 # Initialize ChromaDB memory with custom config
-relevant_file_database = ChromaDBVectorMemory(
-    config=PersistentChromaDBVectorMemoryConfig(
-        collection_name="Submitted Files",
-        persistence_path=os.path.join(str(Path.home()), ".chromadb_autogen"),
-        k=10,  # Return top  k results
-        score_threshold=0.4,  # Minimum similarity score
-    )
-)
+
 # Global expert tracker
 expert_tracker = ExpertTracker()
 
 
-team = RoundRobinGroupChat(
+organizing_team = RoundRobinGroupChat(
     [organizer_agent, organizer_critic_agent], 
     termination_condition=TextMentionTermination(text="EXPERT GENERATION DONE", sources=["organizer"])
 )
 
 async def main():
-    await team.reset()  # Reset the team for a new task.
+    await organizing_team.reset()  # Reset the team for a new task.
     # async for message in team.run_stream(task="Generate a team of experts for risk assessment."):  # type: ignore
     #     if isinstance(message, TaskResult):
     #         print("Stop Reason:", message.stop_reason)
@@ -88,8 +82,38 @@ async def main():
 
     You will have access to relevant data to help with keyword generation and expert identification.
     """
-    await Console(team.run_stream(task=task))  # Stream the messages to the console.
+    await Console(organizing_team.run_stream(task=task))  # Stream the messages to the console.
 
     # await team.close() # No need when using Console wrapper
+
+    # Read text_files/approved_experts.json
+    with open("text_files/approved_experts.json", "r") as f:
+        approved_experts = json.load(f)
+
+    swift_agents = []
+
+    swift_coordinator = AssistantAgent(
+        "swift_coordinator",
+        model_client=base_client,
+        system_message=SWIFT_COORDINATOR_PROMPT,
+    )
+
+    swift_agents.append(swift_coordinator)
+
+    # Loop over approved experts to create an agent for each of them, then assemble a team
+    for expert in approved_experts:
+        expert_agent = AssistantAgent(
+            expert["name"],
+            model_client=base_client,
+            system_message=expert["system_prompt"],
+        )
+        print(expert_agent.name)
+        swift_agents.append(expert_agent)
+    
+    # Create the team
+    SwiftTeam = SelectorGroupChat(participants=swift_agents, model_client=base_client, termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"))
+    
+    await Console(SwiftTeam.run_stream(task="Generate a team of experts for risk assessment."))  # Stream the messages to the console.
+    
 
 asyncio.run(main())
