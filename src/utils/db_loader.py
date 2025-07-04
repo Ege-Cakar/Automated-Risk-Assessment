@@ -108,6 +108,9 @@ class TextChunker:
             
             # Extract chunk
             chunk_text = text[start:end].strip()
+            if len(chunk_text) < 50:  # Debug tiny chunks
+                print(f"WARNING: Tiny chunk created: {repr(chunk_text)} from position {start}:{end}")
+                print(f"Original (unstripped): {repr(text[start:end])}")
             
             if chunk_text:
                 chunk_metadata = (metadata or {}).copy()

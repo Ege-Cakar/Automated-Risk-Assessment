@@ -30,6 +30,7 @@ async def test_chunking_safe():
         k=5
     )
     memory = LobeVectorMemory(config)
+    await memory.clear()
     
     try:
         await add_files_from_folder(memory, DOCUMENTS_DIR)
@@ -59,11 +60,18 @@ async def test_chunking_safe():
                 total_chunks = metadata.get('total_chunks', 'N/A')
                 score = metadata.get('score', 'N/A')
                 
-                print(f"\n📄 Result {i+1}:")
+                print(f"\n{'='*80}")
+                print(f"📄 Result {i+1}:")
+                print(f"  Source file: {metadata.get('filename', 'unknown')}")
                 print(f"  Chunk: {chunk_index}/{total_chunks}")
                 print(f"  Score: {score:.4f}" if isinstance(score, float) else f"  Score: {score}")
                 print(f"  Content hash: {content_hash}")
-                print(f"  Preview: {content[:100]}...")
+                print(f"  Chunk ID: {metadata.get('id', 'N/A')}")
+                print(f"  Content length: {len(content)} chars")
+                print(f"\n  FULL CONTENT:")
+                print(f"  {'-'*76}")
+                print(f"  {repr(content)}")  # This shows the exact content with escape chars
+                print(f"  {'-'*76}")
                 
                 if content_hash not in seen_content_hashes:
                     unique_chunks += 1
@@ -110,9 +118,38 @@ async def test_chunking_safe():
         import traceback
         traceback.print_exc()
     
-    finally:
-        # Clean up
-        gc.collect()
+    print("\n" + "="*80)
+    print("🔍 DIAGNOSTIC: Checking for duplicate content in database...")
+
+    # Query specifically for "management"
+    diagnostic_results = await memory.query("management")
+    print(f"Found {len(diagnostic_results)} results for 'management'")
+
+    # Group by content
+    content_groups = {}
+    for result in diagnostic_results[:20]:  # Check first 20
+        content = result.results[0].content
+        metadata = result.results[0].metadata
+        
+        if content not in content_groups:
+            content_groups[content] = []
+        
+        content_groups[content].append({
+            'filename': metadata.get('filename', 'unknown'),
+            'chunk_index': metadata.get('chunk_index', 'N/A'),
+            'total_chunks': metadata.get('total_chunks', 'N/A'),
+            'id': metadata.get('id', 'N/A')
+        })
+
+    # Show duplicate content
+    for content, occurrences in content_groups.items():
+        if len(occurrences) > 1:
+            print(f"\n⚠️  Found {len(occurrences)} chunks with identical content:")
+            print(f"Content: {repr(content[:100])}...")
+            for occ in occurrences:
+                print(f"  - {occ['filename']}: chunk {occ['chunk_index']}/{occ['total_chunks']} (ID: {occ['id'][:8]}...)")
+
+    gc.collect()
 
 async def main():
     try:
