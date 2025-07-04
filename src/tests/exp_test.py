@@ -99,6 +99,8 @@ async def test_expert_with_shared_messages():
         CancellationToken()
     )
     
+    # Not implemented yet
+    
     print(f"Expert response:\n{response.chat_message.content}\n")
     
     # 7. Test 3: Expert in a team setting

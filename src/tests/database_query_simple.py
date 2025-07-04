@@ -6,6 +6,8 @@ import gc
 from dotenv import load_dotenv
 from utils.db_loader import LobeVectorMemory, add_files_from_folder
 from utils.db_summarizer import get_database_stats
+from utils.paths import paths
+from utils.db_loader import LobeVectorMemoryConfig
 
 load_dotenv()
 
@@ -16,7 +18,12 @@ async def main():
     print("🔄 Initializing database and loading files...")
     
     # Initialize memory
-    memory = LobeVectorMemory()
+    memory = LobeVectorMemory(
+        config=LobeVectorMemoryConfig(
+            collection_name="expert_test",
+            persistence_path=paths.VECTORDB_PATH
+        )
+    )
     
     # Load files from database folder
     db_file_path = "../database"

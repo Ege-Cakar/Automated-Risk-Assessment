@@ -1,4 +1,6 @@
 .venv
 .env
 src/text_files/approved_experts.json
-src/database
+database
+src/database_query_example.py
+src/utils/db_summarizer.py
