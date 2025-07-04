@@ -133,7 +133,7 @@ class Lobe(AssistantAgent):
         else:
             context_parts = [f"Relevant context for keywords [{', '.join(self.keywords)}]:"]
             for i, result in enumerate(results[:3], 1):
-                context_parts.append(f"{i}. {result.results[0].content[:200]}...")
+                context_parts.append(f"{i}. {result.results[0].content}")
             context = "\n".join(context_parts)
         
         # Update system message
