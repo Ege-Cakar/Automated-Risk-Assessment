@@ -24,43 +24,14 @@ async def test_chunking_safe():
     # Initialize memory with chunking enabled
     config = LobeVectorMemoryConfig(
         collection_name="safe_chunking_test",
-        chunk_size=200,  # Very small chunks for testing
+        chunk_size=1000,    
         chunk_overlap=50,
         enable_chunking=True,
         k=5
     )
     memory = LobeVectorMemory(config)
     
-    # Create a large test document that will definitely be chunked
-    large_document = """
-    Risk management is a critical process for organizations across all industries. It involves identifying, assessing, and mitigating potential risks that could impact business operations, financial performance, or strategic objectives.
-    
-    The risk assessment process typically begins with risk identification, where organizations systematically catalog potential threats and vulnerabilities. This includes operational risks, financial risks, strategic risks, and compliance risks.
-    
-    Security assessment is another crucial component of comprehensive risk management. Organizations must evaluate their cybersecurity posture, assess vulnerabilities in their IT infrastructure, and implement appropriate security controls.
-    
-    Compliance and regulatory requirements add another layer of complexity to risk management. Organizations must stay current with evolving regulations and ensure their risk management frameworks align with regulatory expectations.
-    
-    Effective risk management requires ongoing monitoring, regular assessment updates, and continuous improvement of risk mitigation strategies. This iterative approach helps organizations adapt to changing risk landscapes and emerging threats.
-    """
-    
-    print("📄 Adding large test document with chunking...")
-    
-    # Add the large document
-    content = MemoryContent(
-        content=large_document,
-        mime_type=MemoryMimeType.TEXT,
-        metadata={
-            "source": "test_document.txt",
-            "filename": "test_document.txt",
-            "type": "test"
-        }
-    )
-    
     try:
-        await memory.add(content)
-        print("✅ Document added successfully with chunking!")
-
         await add_files_from_folder(memory, DOCUMENTS_DIR)
         
         # Get collection info

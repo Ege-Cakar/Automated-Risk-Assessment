@@ -14,6 +14,9 @@ from .paths import paths, VECTORDB_PATH
 import logging
 import os
 import gc
+import time
+
+logging.basicConfig(level=logging.INFO)
 
 # PDF processing imports
 try:
@@ -203,39 +206,52 @@ class LobeVectorMemory(Memory):
                 # Use chunking for large documents
                 chunks = self.chunker.chunk_text(text_content, content.metadata)
                 
-                documents = []
-                embeddings = []
-                metadatas = []
-                ids = []
+                # ChromaDB has a max batch size limit (appears to be 5461?)
+                # We'll use a safe batch size of 4096, because I like powers of two
+                MAX_BATCH_SIZE = 4096
                 
-                for chunk in chunks:
-                    chunk_id = str(uuid.uuid4())
-                    chunk_content = chunk["content"]
-                    chunk_metadata = chunk["metadata"]
+                total_chunks_added = 0
+                
+                # Process chunks in batches
+                for batch_start in range(0, len(chunks), MAX_BATCH_SIZE):
+                    batch_end = min(batch_start + MAX_BATCH_SIZE, len(chunks))
+                    batch_chunks = chunks[batch_start:batch_end]
                     
-                    # Generate embedding for chunk
-                    embedding = self._embedding_model.encode(chunk_content).tolist()
+                    documents = []
+                    embeddings = []
+                    metadatas = []
+                    ids = []
                     
-                    documents.append(chunk_content)
-                    embeddings.append(embedding)
-                    metadatas.append(chunk_metadata)
-                    ids.append(chunk_id)
+                    for chunk in batch_chunks:
+                        chunk_id = str(uuid.uuid4())
+                        chunk_content = chunk["content"]
+                        chunk_metadata = chunk["metadata"]
+                        
+                        # Generate embedding for chunk
+                        embedding = self._embedding_model.encode(chunk_content, show_progress_bar=False).tolist()
+                        
+                        documents.append(chunk_content)
+                        embeddings.append(embedding)
+                        metadatas.append(chunk_metadata)
+                        ids.append(chunk_id)
+                    
+                    # Add this batch of chunks to collection
+                    self._collection.add(
+                        documents=documents,
+                        embeddings=embeddings,
+                        metadatas=metadatas,
+                        ids=ids
+                    )
+                    
+                    total_chunks_added += len(batch_chunks)
                 
-                # Add all chunks to collection
-                self._collection.add(
-                    documents=documents,
-                    embeddings=embeddings,
-                    metadatas=metadatas,
-                    ids=ids
-                )
-                
-                return f"Added {len(chunks)} chunks"
+                return f"Added {total_chunks_added} chunks in {(len(chunks) + MAX_BATCH_SIZE - 1) // MAX_BATCH_SIZE} batches"
             else:
                 # Add as single document (original behavior)
                 doc_id = str(uuid.uuid4())
                 
                 # Generate embedding
-                embedding = self._embedding_model.encode(text_content).tolist()
+                embedding = self._embedding_model.encode(text_content, show_progress_bar=False).tolist()
                 
                 # Add to collection
                 self._collection.add(
@@ -255,7 +271,7 @@ class LobeVectorMemory(Memory):
         """Query ChromaDB using thread pool."""
         def _sync_query():
             # Generate query embedding
-            query_embedding = self._embedding_model.encode(query).tolist()
+            query_embedding = self._embedding_model.encode(query, show_progress_bar=False).tolist()
             
             # Query collection
             results = self._collection.query(
@@ -297,17 +313,24 @@ class LobeVectorMemory(Memory):
     
     async def search_by_keywords(self, keywords: List[str]) -> List[MemoryQueryResult]:
         """Search using multiple keywords."""
-        all_results = {}
-        seen_ids = set()
+        all_results = {}  # Use dict to store by unique chunk ID
         
         # Query for each keyword
         for keyword in keywords:
             retrieved_results = await self.query(keyword)
             for result in retrieved_results:
-                doc_id = result.results[0].metadata.get('id')
-                if doc_id and doc_id not in seen_ids:
-                    seen_ids.add(doc_id)
-                    all_results[doc_id] = result
+                # Get the unique chunk ID
+                chunk_id = result.results[0].metadata.get('id')
+                
+                # Only add if we haven't seen this chunk ID
+                if chunk_id and chunk_id not in all_results:
+                    all_results[chunk_id] = result
+                elif chunk_id in all_results:
+                    # If we've seen it, update if this has a better score
+                    existing_score = all_results[chunk_id].results[0].metadata.get('score', 0)
+                    new_score = result.results[0].metadata.get('score', 0)
+                    if new_score > existing_score:
+                        all_results[chunk_id] = result
         
         # Sort by score
         sorted_results = sorted(
@@ -419,31 +442,130 @@ def _extract_pdf_text(file_path: str) -> str:
 
 
 # Helper function for batch operations
-async def batch_add_documents(memory: LobeVectorMemory, documents: List[Dict[str, Any]]):
-    """Batch add multiple documents efficiently."""
-    tasks = []
-    for doc in documents:
-        content = MemoryContent(
-            content=doc["content"],
-            mime_type=MemoryMimeType.TEXT,
-            metadata=doc.get("metadata", {})
-        )
-        tasks.append(memory.add(content))
-    
-    await asyncio.gather(*tasks)
-
-async def add_files_from_folder(memory: LobeVectorMemory, folder_path: str, file_extensions: List[str] = None):
+async def batch_add_documents(
+    memory: LobeVectorMemory, 
+    documents: List[Dict[str, Any]], 
+    max_concurrent: int = 3,
+    progress_interval: int = 5
+):
     """
-    Add all files from a folder to LobeVectorMemory.
+    Batch add multiple documents with limited concurrency and progress monitoring.
+    
+    Args:
+        memory: LobeVectorMemory instance
+        documents: List of documents to add
+        max_concurrent: Maximum number of documents to process concurrently
+        progress_interval: Log progress every N documents
+    """
+    if not documents:
+        logger.info("No documents to add")
+        return
+    
+    total_docs = len(documents)
+    logger.info(f"🚀 Starting to add {total_docs} documents with max concurrency of {max_concurrent}")
+    
+    # Track progress
+    completed = 0
+    failed = 0
+    start_time = time.time()
+    completed_lock = asyncio.Lock()
+    
+    # Semaphore to limit concurrency
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def add_document_with_progress(doc: Dict[str, Any], index: int):
+        nonlocal completed, failed
+        
+        async with semaphore:
+            filename = doc.get('metadata', {}).get('filename', f'document_{index}')
+            
+            try:
+                # Log when starting a document
+                logger.debug(f"Processing document {index + 1}/{total_docs}: {filename}")
+                
+                content = MemoryContent(
+                    content=doc["content"],
+                    mime_type=MemoryMimeType.TEXT,
+                    metadata=doc.get("metadata", {})
+                )
+                
+                # Time individual document processing
+                doc_start = time.time()
+                await memory.add(content)
+                doc_time = time.time() - doc_start
+                
+                async with completed_lock:
+                    completed += 1
+                    
+                    # Log progress at intervals or for slow documents
+                    if completed % progress_interval == 0 or doc_time > 5:
+                        elapsed = time.time() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        eta = (total_docs - completed) / rate if rate > 0 else 0
+                        
+                        logger.info(
+                            f"📊 Progress: {completed}/{total_docs} ({completed/total_docs*100:.1f}%) | "
+                            f"Rate: {rate:.1f} docs/sec | ETA: {eta:.1f}s | "
+                            f"Last doc: {filename} ({doc_time:.2f}s)"
+                        )
+                
+            except Exception as e:
+                async with completed_lock:
+                    failed += 1
+                logger.error(f"❌ Failed to add document {filename}: {str(e)}")
+                
+                # Log progress even on failure
+                if (completed + failed) % progress_interval == 0:
+                    elapsed = time.time() - start_time
+                    logger.info(
+                        f"📊 Progress: {completed + failed}/{total_docs} "
+                        f"(✅ {completed} | ❌ {failed}) | "
+                        f"Elapsed: {elapsed:.1f}s"
+                    )
+    
+    # Create all tasks
+    tasks = [
+        add_document_with_progress(doc, i) 
+        for i, doc in enumerate(documents)
+    ]
+    
+    # Process all tasks
+    await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Final summary
+    total_time = time.time() - start_time
+    avg_rate = completed / total_time if total_time > 0 else 0
+    
+    logger.info(
+        f"\n✅ Batch processing complete!\n"
+        f"   Total documents: {total_docs}\n"
+        f"   Successfully added: {completed}\n"
+        f"   Failed: {failed}\n"
+        f"   Total time: {total_time:.2f}s\n"
+        f"   Average rate: {avg_rate:.2f} docs/sec"
+    )
+
+async def add_files_from_folder(
+    memory: LobeVectorMemory, 
+    folder_path: str, 
+    file_extensions: List[str] = None,
+    max_concurrent: int = 3
+):
+    """
+    Add all files from a folder with progress monitoring.
     
     Args:
         memory: Initialized LobeVectorMemory instance
         folder_path: Path to the folder containing files
-        file_extensions: Optional list of file extensions to filter by (e.g. ['.txt', '.md'])
+        file_extensions: Optional list of file extensions to filter by
+        max_concurrent: Maximum concurrent document processing
     """
-    documents = []
+    logger.info(f"📁 Scanning folder: {folder_path}")
     
-    # Walk through all files in the folder
+    documents = []
+    skipped_files = []
+    
+    # First, collect all documents
     for root, _, files in os.walk(folder_path):
         for file in files:
             # Filter by extension if specified
@@ -452,22 +574,23 @@ async def add_files_from_folder(memory: LobeVectorMemory, folder_path: str, file
                 
             file_path = os.path.join(root, file)
             
+            # Skip system files
+            if file.startswith('.'):
+                logger.debug(f"Skipping system file: {file}")
+                continue
+            
             try:
                 content = None
                 file_type = "file"
                 
-                # Skip system files
-                if file.startswith('.DS_Store') or file.startswith('.'):
-                    print(f"Skipping system file: {file_path}")
-                    continue
-                
                 # Handle PDF files
                 if file.lower().endswith('.pdf'):
                     if PDF_AVAILABLE:
+                        logger.debug(f"Extracting text from PDF: {file}")
                         content = _extract_pdf_text(file_path)
                         file_type = "pdf"
                     else:
-                        print(f"Skipping PDF file (PyPDF2 not available): {file_path}")
+                        skipped_files.append((file, "PDF support not available"))
                         continue
                 else:
                     # Try to read as text file
@@ -475,39 +598,60 @@ async def add_files_from_folder(memory: LobeVectorMemory, folder_path: str, file
                         with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
                     except UnicodeDecodeError:
-                        # Try with different encodings
+                        # Try alternative encodings
                         for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
                             try:
                                 with open(file_path, 'r', encoding=encoding) as f:
                                     content = f.read()
-                                print(f"Successfully read {file_path} with {encoding} encoding")
+                                logger.debug(f"Read {file} with {encoding} encoding")
                                 break
                             except UnicodeDecodeError:
                                 continue
                         
                         if content is None:
-                            print(f"Skipping binary file (cannot decode as text): {file_path}")
+                            skipped_files.append((file, "Unable to decode file"))
                             continue
                 
-                # Only add if we successfully extracted content
+                # Only add if we have content
                 if content and content.strip():
                     doc = {
                         "content": content,
                         "metadata": {
                             "source": file_path,
                             "filename": file,
-                            "type": file_type
+                            "type": file_type,
+                            "size": len(content)
                         }
                     }
                     documents.append(doc)
-                    print(f"Successfully processed: {file_path}")
+                    logger.debug(f"Collected: {file} ({len(content)} chars)")
                 else:
-                    print(f"Skipping empty file: {file_path}")
+                    skipped_files.append((file, "Empty file"))
                     
             except Exception as e:
-                print(f"Error processing file {file_path}: {e}")
+                logger.error(f"Error reading file {file_path}: {e}")
+                skipped_files.append((file, str(e)))
     
-    # Use the existing batch_add_documents function
-    await batch_add_documents(memory, documents)
+    # Log collection summary
+    logger.info(
+        f"\n📋 File collection complete:\n"
+        f"   Files found: {len(documents)}\n"
+        f"   Files skipped: {len(skipped_files)}"
+    )
+    
+    if skipped_files:
+        logger.debug("Skipped files:")
+        for file, reason in skipped_files[:10]:  # Show first 10
+            logger.debug(f"   - {file}: {reason}")
+        if len(skipped_files) > 10:
+            logger.debug(f"   ... and {len(skipped_files) - 10} more")
+    
+    # Process documents with progress monitoring
+    if documents:
+        await batch_add_documents(
+            memory, 
+            documents, 
+            max_concurrent=max_concurrent
+        )
     
     return len(documents)
