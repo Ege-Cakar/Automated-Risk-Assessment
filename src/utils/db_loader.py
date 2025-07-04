@@ -226,9 +226,14 @@ class LobeVectorMemory(Memory):
                     ids = []
                     
                     for chunk in batch_chunks:
+                        
                         chunk_id = str(uuid.uuid4())
                         chunk_content = chunk["content"]
                         chunk_metadata = chunk["metadata"]
+
+                        if content.metadata and 'source' in content.metadata:
+                            chunk_metadata['source'] = content.metadata['source']
+
                         
                         # Generate embedding for chunk
                         embedding = self._embedding_model.encode(chunk_content, show_progress_bar=False).tolist()
@@ -270,6 +275,27 @@ class LobeVectorMemory(Memory):
         result = await asyncio.to_thread(_sync_add)
         logger.info(f"Added content to collection {self.config.collection_name}: {result}")
     
+    async def get_processed_files(self) -> set:
+        """Get set of file paths that have already been processed."""
+        def _sync_get_sources():
+            try:
+                results = self._collection.get(
+                    include=["metadatas"]
+                )
+                
+                sources = set()
+                for metadata in results.get('metadatas', []):
+                    if metadata and 'source' in metadata:
+                        sources.add(metadata['source'])
+                
+                return sources
+            except Exception as e:
+                logger.error(f"Error getting processed files: {e}")
+                return set()
+        
+        return await asyncio.to_thread(_sync_get_sources)
+
+
     async def query(self, query: str, cancellation_token=None) -> List[MemoryQueryResult]:
         """Query ChromaDB using thread pool."""
         def _sync_query():
@@ -552,41 +578,55 @@ async def add_files_from_folder(
     memory: LobeVectorMemory, 
     folder_path: str, 
     file_extensions: List[str] = None,
-    max_concurrent: int = 3
+    max_concurrent: int = 5,
+    force_reprocess: bool = False 
 ):
     """
-    Add all files from a folder with progress monitoring.
+    Add files from folder, optionally skipping already processed ones.
     
     Args:
-        memory: Initialized LobeVectorMemory instance
-        folder_path: Path to the folder containing files
-        file_extensions: Optional list of file extensions to filter by
-        max_concurrent: Maximum concurrent document processing
+        memory: LobeVectorMemory instance
+        folder_path: Path to folder
+        file_extensions: Optional file extensions filter
+        max_concurrent: Max concurrent processing
+        force_reprocess: If True, reprocess all files. If False, skip processed files.
     """
     logger.info(f"📁 Scanning folder: {folder_path}")
     
+    # Get already processed files if not forcing reprocess
+    processed_files = set()
+    if not force_reprocess:
+        processed_files = await memory.get_processed_files()
+        logger.info(f"📊 Found {len(processed_files)} already processed files")
+    
     documents = []
     skipped_files = []
+    already_processed = []
     
     # First, collect all documents
     for root, _, files in os.walk(folder_path):
         for file in files:
-            # Filter by extension if specified
             if file_extensions and not any(file.endswith(ext) for ext in file_extensions):
                 continue
                 
             file_path = os.path.join(root, file)
+            
+            # Check if already processed
+            if file_path in processed_files:
+                already_processed.append(file)
+                logger.debug(f"Skipping already processed: {file}")
+                continue
             
             # Skip system files
             if file.startswith('.'):
                 logger.debug(f"Skipping system file: {file}")
                 continue
             
+            # Your existing file processing code...
             try:
                 content = None
                 file_type = "file"
                 
-                # Handle PDF files
                 if file.lower().endswith('.pdf'):
                     if PDF_AVAILABLE:
                         logger.debug(f"Extracting text from PDF: {file}")
@@ -601,33 +641,20 @@ async def add_files_from_folder(
                         with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
                     except UnicodeDecodeError:
-                        # Try alternative encodings
-                        for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
-                            try:
-                                with open(file_path, 'r', encoding=encoding) as f:
-                                    content = f.read()
-                                logger.debug(f"Read {file} with {encoding} encoding")
-                                break
-                            except UnicodeDecodeError:
-                                continue
-                        
-                        if content is None:
-                            skipped_files.append((file, "Unable to decode file"))
-                            continue
+                        logger.debug(f"Failed to read file: {file_path}")
                 
-                # Only add if we have content
                 if content and content.strip():
                     doc = {
                         "content": content,
                         "metadata": {
-                            "source": file_path,
+                            "source": file_path,  # CRITICAL: This must be here!
                             "filename": file,
                             "type": file_type,
                             "size": len(content)
                         }
                     }
                     documents.append(doc)
-                    logger.debug(f"Collected: {file} ({len(content)} chars)")
+                    print(f"Successfully processed: {file_path}")
                 else:
                     skipped_files.append((file, "Empty file"))
                     
@@ -638,23 +665,15 @@ async def add_files_from_folder(
     # Log collection summary
     logger.info(
         f"\n📋 File collection complete:\n"
-        f"   Files found: {len(documents)}\n"
+        f"   New files to process: {len(documents)}\n"
+        f"   Already processed: {len(already_processed)}\n" 
         f"   Files skipped: {len(skipped_files)}"
     )
     
-    if skipped_files:
-        logger.debug("Skipped files:")
-        for file, reason in skipped_files[:10]:  # Show first 10
-            logger.debug(f"   - {file}: {reason}")
-        if len(skipped_files) > 10:
-            logger.debug(f"   ... and {len(skipped_files) - 10} more")
-    
-    # Process documents with progress monitoring
+    # Only process new documents
     if documents:
-        await batch_add_documents(
-            memory, 
-            documents, 
-            max_concurrent=max_concurrent
-        )
+        await batch_add_documents(memory, documents, max_concurrent=max_concurrent)
+    else:
+        logger.info("✅ No new files to process!")
     
     return len(documents)

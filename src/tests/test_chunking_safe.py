@@ -23,14 +23,13 @@ async def test_chunking_safe():
     
     # Initialize memory with chunking enabled
     config = LobeVectorMemoryConfig(
-        collection_name="safe_chunking_test",
+        collection_name="db_test",
         chunk_size=1000,    
         chunk_overlap=50,
         enable_chunking=True,
         k=5
     )
     memory = LobeVectorMemory(config)
-    await memory.clear()
     
     try:
         await add_files_from_folder(memory, DOCUMENTS_DIR)
