@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any, Union, Sequence
+from typing import List, Dict, Any
 from autogen_agentchat.agents import BaseChatAgent
 from autogen_agentchat.base import Response, TaskResult
 from autogen_agentchat.messages import TextMessage, ChatMessage, StopMessage, HandoffMessage
@@ -6,10 +6,11 @@ from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
 from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient
+from autogen_core.tools import FunctionTool
 import asyncio
 import logging
 from .lobe import Lobe
-from ..utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig
+from ..utils.db_loader import LobeVectorMemory
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class Expert(BaseChatAgent):
     """
     Expert agent that internally manages a team of two Lobe agents.
     Appears as a single agent externally but runs an internal deliberation process.
+    Supports handoffs.
     """
     
     def __init__(
@@ -27,6 +29,7 @@ class Expert(BaseChatAgent):
         system_message: str = None,
         lobe1_config: Dict[str, Any] = None,
         lobe2_config: Dict[str, Any] = None,
+        handoffs: List[BaseChatAgent] = None,
         max_rounds: int = 100,
         description: str = "An expert agent that internally deliberates using two specialized lobes, one for creativity and one for reasoning.",
         **kwargs
@@ -53,6 +56,9 @@ class Expert(BaseChatAgent):
             "You are an expert assistant with deep knowledge in your domain. "
             "You think carefully and provide well-reasoned responses."
         )
+        self._handoffs = handoffs or []
+
+        handoff_tools = self._create_handoff_tools()
         
         # Default configurations
         lobe1_config = lobe1_config or {}
@@ -63,7 +69,9 @@ class Expert(BaseChatAgent):
         2. For each scenario, imagine creative but plausible deviations and their cascading consequences
         3. Consider both obvious and non-obvious failure modes
         4. Propose innovative safeguards beyond standard controls
-        Stay focused on SWIFT risk assessment - every idea must connect to a specific guide word + component combination."""
+        Stay focused on SWIFT risk assessment - every idea must connect to a specific guide word + component combination.
+        IMPORTANT: You are in a dialogue with your analytical counterpart. Present scenarios one at a time for discussion. Do NOT try to cover everything in one message. Start with your most critical scenario.
+        """
 
         lobe2_specific = """You are the analytical counterpart implementing SWIFT methodology. Your role:
         1. Validate what-if scenarios for realism and criticality
@@ -71,11 +79,18 @@ class Expert(BaseChatAgent):
         3. Evaluate existing safeguards' effectiveness quantitatively
         4. Prioritize risks using a risk matrix (likelihood × impact)
         5. Synthesize actionable recommendations with implementation details
-        When you see comprehensive SWIFT coverage across all guide words and critical components, start your message with 'CONCLUDE:' followed by structured findings."""
+        IMPORTANT: You are in a dialogue with your creative counterpart. Respond to each scenario they present, then ask for the next one. Only after you've covered multiple scenarios across different guide words should you synthesize findings. When ready to conclude (after substantial analysis), start your message with 'CONCLUDE:' followed by structured findings"""
             
+        if self._handoffs:
+            handoff_instruction = self._create_handoff_instruction()
+            lobe1_specific += f"\n\n{handoff_instruction}"
+            lobe2_specific += f"\n\n{handoff_instruction}"
 
         lobe1_full_message = f"{self._base_system_message}\n\n{lobe1_specific}"
         lobe2_full_message = f"{self._base_system_message}\n\n{lobe2_specific}"
+
+        lobe1_tools = lobe1_config.get('tools', []) + handoff_tools
+        lobe2_tools = lobe2_config.get('tools', []) + handoff_tools
 
         # Create Lobe 1 - Analytical specialist
         self._lobe1 = Lobe(
@@ -85,7 +100,7 @@ class Expert(BaseChatAgent):
             keywords=lobe1_config.get('keywords', []),
             temperature=lobe1_config.get('temperature', 0.8),
             system_message=lobe1_full_message,
-            tools=lobe1_config.get('tools', None)
+            tools=lobe1_tools
         )
         
         self._lobe2 = Lobe(
@@ -95,7 +110,7 @@ class Expert(BaseChatAgent):
             keywords=lobe2_config.get('keywords', []),
             temperature=lobe2_config.get('temperature', 0.4),  # Lower temperature for checking
             system_message=lobe2_full_message,
-            tools=lobe2_config.get('tools', None)
+            tools=lobe2_tools
         )
         
         # Initialize contexts for both lobes
@@ -104,6 +119,49 @@ class Expert(BaseChatAgent):
         # Setup internal team
         self._setup_internal_team()
     
+    def _create_handoff_tools(self) -> List[FunctionTool]:
+        """Create function tools for each handoff agent."""
+        tools = []
+        for target_name in self._handoffs:
+            def create_handoff_function(target: str):
+                async def handoff_to_agent(reason: str = "") -> str:
+                    """Mark that a handoff should occur after providing response."""
+                    # Store handoff info for later processing
+                    self._pending_handoff = {
+                        'target': target,
+                        'reason': reason,
+                    }
+                    return f"[Handoff to {target} noted - will complete after providing response]"
+                
+                return handoff_to_agent
+            
+            tool = FunctionTool(
+                create_handoff_function(target_name),
+                name=f"transfer_to_{target_name}",
+                description=f"Mark for transfer to {target_name} after responding."
+            )
+            tools.append(tool)
+        
+        return tools
+
+    
+    def _create_handoff_instruction(self) -> str:
+        """Create instruction text about available handoff agents."""
+        if not self._handoffs:
+            return ""
+        
+        handoff_list = [f"- {name}" for name in self._handoffs]
+        
+        return (
+            "When you determine that another agent could provide additional value after "
+            "your response, you can mark the conversation for handoff. You should ALWAYS "
+            "provide your complete analysis first, then use the transfer function to "
+            "indicate which agent should provide supplementary expertise.\n\n"
+            "Available agents for handoff:\n" + 
+            "\n".join(handoff_list) + 
+            "\n\nIMPORTANT: Always complete your full response before marking for handoff."
+        )
+        
     async def _initialize_lobes(self):
         """Initialize context for both lobes."""
         if not self._initialized:
@@ -116,6 +174,8 @@ class Expert(BaseChatAgent):
         """Set up the internal round-robin team for the two lobes."""
         # Use TextMentionTermination to stop when Lobe2 says "CONCLUDE:"
         conclude_condition = TextMentionTermination("CONCLUDE:")
+
+        handoff_condition = TextMentionTermination("transfer_to_")
         
         # Fallback: stop after max rounds
         max_messages_condition = MaxMessageTermination(max_messages=self._max_rounds * 2)
@@ -123,7 +183,7 @@ class Expert(BaseChatAgent):
         # Create internal team
         self._internal_team = RoundRobinGroupChat(
             participants=[self._lobe1, self._lobe2],
-            termination_condition=conclude_condition | max_messages_condition
+            termination_condition=conclude_condition | max_messages_condition | handoff_condition
         )
         
         logger.info(f"Setup internal team for Expert {self.name}")
@@ -135,14 +195,28 @@ class Expert(BaseChatAgent):
     ) -> Response:
         """
         Process incoming messages by running internal team discussion.
+        Can provide a full response AND hand off to another agent.
         
         Args:
             messages: List of chat messages
             cancellation_token: Cancellation token
             
         Returns:
-            Response containing the expert's synthesized conclusion
+            Response containing the expert's synthesized conclusion and/or handoff
         """
+        if not messages:
+            logger.warning(f"Expert {self.name} received empty message list")
+            msg = f"Expert {self.name} called. Messages count: {len(messages)}. "
+            return Response(
+                chat_message=TextMessage(
+                    content=msg,
+                    source=self.name
+                )
+            )
+    
+        # Reset pending handoff
+        self._pending_handoff = None
+        
         # Ensure lobes are initialized
         await self._initialize_lobes()
         
@@ -154,10 +228,10 @@ class Expert(BaseChatAgent):
             query = str(last_message)
         
         # Log the incoming query
-        logger.info(f"Expert {self.name} received query: {query}")
+        logger.info(f"Expert {self.name} received a message.")
         
         # Prepare initial task for internal team
-        internal_task = f"Please analyze and respond to this query: {query}"
+        internal_task = query
         
         try:
             # Run internal team discussion
@@ -167,12 +241,32 @@ class Expert(BaseChatAgent):
                 cancellation_token=cancellation_token
             )
             
-            # Extract and format the conclusion
+            # Extract and format the conclusion FIRST
             final_response = self._extract_conclusion(result)
+            
+            # Check if a handoff was triggered during internal discussion
+            if self._pending_handoff:
+                logger.info(f"Expert {self.name} providing response and initiating handoff to {self._pending_handoff['target']}")
+                
+                # Combine the response with handoff indication
+                combined_content = (
+                    f"{final_response}\n\n"
+                    f"---\n"
+                    f"For additional expertise, I'm handing this off to {self._pending_handoff['target']}: "
+                    f"{self._pending_handoff['reason']}"
+                )
+                
+                # Return a HandoffMessage that includes the full response
+                handoff_msg = HandoffMessage(
+                    content=combined_content,
+                    target=self._pending_handoff['target'],
+                    source=self.name
+                )
+                return Response(chat_message=handoff_msg)
             
             logger.info(f"Expert {self.name} completed deliberation")
             
-            # Return response as coming from the Expert
+            # Return normal response if no handoff
             return Response(
                 chat_message=TextMessage(
                     content=final_response,
@@ -197,6 +291,7 @@ class Expert(BaseChatAgent):
                     source=self.name
                 )
             )
+
     
     def _extract_conclusion(self, task_result: TaskResult) -> str:
         """
@@ -224,7 +319,7 @@ class Expert(BaseChatAgent):
         synthesis_parts = ["Based on internal analysis:"]
         
         # Get last 3 messages for synthesis
-        recent_messages = task_result.messages[-3:] if len(task_result.messages) >= 3 else task_result.messages
+        recent_messages = task_result.messages
         
         for msg in recent_messages:
             if isinstance(msg, TextMessage):
@@ -292,4 +387,4 @@ class Expert(BaseChatAgent):
     def produced_message_types(self) -> List[type[ChatMessage]]:
         """Message types that this agent can produce."""
         # Expert can produce text messages and potentially stop messages
-        return [TextMessage, StopMessage]
+        return [TextMessage, StopMessage, HandoffMessage]
