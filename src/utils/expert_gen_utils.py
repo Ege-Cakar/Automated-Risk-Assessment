@@ -177,7 +177,7 @@ def func_save_expert(
     expert_keywords: Annotated[list, "List of keywords relevant to the expert"]
 ) -> dict:
     """Save an expert to the structured document"""
-    output_file = "text_files/approved_experts.json"
+    output_file = "src/text_files/approved_experts.json"
     
     # Load existing experts or create new list
     existing_experts = []

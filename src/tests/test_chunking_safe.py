@@ -4,9 +4,9 @@ Safe test script to verify chunking functionality without memory issues
 import asyncio
 import gc
 from dotenv import load_dotenv
-from ..utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig, add_files_from_folder
+from src.utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig, add_files_from_folder
 from autogen_core.memory import MemoryContent, MemoryMimeType
-from ..utils.paths import paths, DOCUMENTS_DIR
+from src.utils.paths import paths, DOCUMENTS_DIR
 load_dotenv()
 
 async def test_chunking_safe():

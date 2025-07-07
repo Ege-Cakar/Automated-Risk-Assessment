@@ -8,8 +8,9 @@ from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient
 import asyncio
 import logging
-from .lobe import Lobe
-from ..utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig
+from src.custom_autogen_code.lobe import Lobe
+from src.utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig
+from src.utils.streaming_utils import AgentStreamer, print_agent_header
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class Expert(BaseChatAgent):
 
         # Create Lobe 1 - Analytical specialist
         self._lobe1 = Lobe(
-            name=f"{name}_Creative",
+            name=f"{name}_creative",
             model_client=model_client,
             vector_memory=vector_memory,
             keywords=lobe1_config.get('keywords', []),
@@ -84,7 +85,7 @@ class Expert(BaseChatAgent):
         )
         
         self._lobe2 = Lobe(
-            name=f"{name}_VoReason",
+            name=f"{name}_reason",
             model_client=model_client,
             vector_memory=vector_memory,
             keywords=lobe2_config.get('keywords', []),
@@ -129,7 +130,7 @@ class Expert(BaseChatAgent):
         cancellation_token: CancellationToken
     ) -> Response:
         """
-        Process incoming messages by running internal team discussion.
+        Process incoming messages by running internal team discussion with streaming.
         
         Args:
             messages: List of chat messages
@@ -138,60 +139,91 @@ class Expert(BaseChatAgent):
         Returns:
             Response containing the expert's synthesized conclusion
         """
-        # Ensure lobes are initialized
-        await self._initialize_lobes()
+        # Print agent header
+        print_agent_header(f"Expert {self.name}")
         
-        # Extract the query from the last message
-        last_message = messages[-1]
-        if isinstance(last_message, TextMessage):
-            query = last_message.content
-        else:
-            query = str(last_message)
-        
-        # Log the incoming query
-        logger.info(f"Expert {self.name} received query: {query}")
-        
-        # Prepare initial task for internal team
-        internal_task = f"Please analyze and respond to this query: {query}"
-        
-        try:
-            # Run internal team discussion
-            logger.info(f"Starting internal deliberation for Expert {self.name}")
-            result = await self._internal_team.run(
-                task=internal_task,
-                cancellation_token=cancellation_token
-            )
+        # Start streaming with thinking indicator
+        async with AgentStreamer(f"Expert {self.name}") as streamer:
+            # Ensure lobes are initialized
+            await self._initialize_lobes()
             
-            # Extract and format the conclusion
-            final_response = self._extract_conclusion(result)
+            # Extract the query from the last message
+            last_message = messages[-1]
+            if isinstance(last_message, TextMessage):
+                query = last_message.content
+            else:
+                query = str(last_message)
             
-            logger.info(f"Expert {self.name} completed deliberation")
+            # Log the incoming query
+            logger.info(f"Expert {self.name} received query: {query}")
             
-            # Return response as coming from the Expert
-            return Response(
-                chat_message=TextMessage(
-                    content=final_response,
-                    source=self.name
+            # Prepare initial task for internal team
+            internal_task = f"Please analyze and respond to this query: {query}"
+            
+            try:
+                # Run internal team discussion
+                logger.info(f"Starting internal deliberation for Expert {self.name}")
+                
+                # Use the internal team's run_stream method if available for real streaming
+                if hasattr(self._internal_team, 'run_stream'):
+                    # Real streaming from internal team
+                    stream = self._internal_team.run_stream(
+                        task=internal_task,
+                        cancellation_token=cancellation_token
+                    )
+                    
+                    # Collect the streamed response
+                    final_response = ""
+                    async for message in stream:
+                        if hasattr(message, 'content'):
+                            content = message.content
+                            final_response += content
+                            # Stream each chunk as it comes
+                            print(content, end="", flush=True)
+                    
+                    print()  # New line after streaming
+                else:
+                    # Fallback to regular run method
+                    result = await self._internal_team.run(
+                        task=internal_task,
+                        cancellation_token=cancellation_token
+                    )
+                    
+                    # Extract and format the conclusion
+                    final_response = self._extract_conclusion(result)
+                    
+                    # Display the response (non-streaming fallback)
+                    await streamer.stream_response(final_response)
+                
+                logger.info(f"Expert {self.name} completed deliberation")
+                
+                # Return response as coming from the Expert
+                return Response(
+                    chat_message=TextMessage(
+                        content=final_response,
+                        source=self.name
+                    )
                 )
-            )
-            
-        except asyncio.CancelledError:
-            logger.warning(f"Expert {self.name} deliberation was cancelled")
-            raise
-            
-        except Exception as e:
-            logger.error(f"Error in Expert {self.name} deliberation: {str(e)}", exc_info=True)
-            error_message = (
-                f"I encountered an error during internal deliberation. "
-                f"Let me provide a direct response instead: Based on the query about "
-                f"'{query}', I need more specific information to provide a detailed answer."
-            )
-            return Response(
-                chat_message=TextMessage(
-                    content=error_message,
-                    source=self.name
+                
+            except asyncio.CancelledError:
+                logger.warning(f"Expert {self.name} deliberation was cancelled")
+                await streamer.stream_response("[Deliberation cancelled]")
+                raise
+                
+            except Exception as e:
+                logger.error(f"Error in Expert {self.name} deliberation: {str(e)}", exc_info=True)
+                error_message = (
+                    f"I encountered an error during internal deliberation. "
+                    f"Let me provide a direct response instead: Based on the query about "
+                    f"'{query}', I need more specific information to provide a detailed answer."
                 )
-            )
+                await streamer.stream_response(error_message)
+                return Response(
+                    chat_message=TextMessage(
+                        content=error_message,
+                        source=self.name
+                    )
+                )
     
     def _extract_conclusion(self, task_result: TaskResult) -> str:
         """
@@ -288,58 +320,3 @@ class Expert(BaseChatAgent):
         """Message types that this agent can produce."""
         # Expert can produce text messages and potentially stop messages
         return [TextMessage, StopMessage]
-    
-# Example usage function
-async def create_expert_team_example():
-    """Example of how to use the Expert agent in a team."""
-    from autogen_ext.models.openai import OpenAIChatCompletionClient
-    from autogen_agentchat.teams import RoundRobinGroupChat
-    from autogen_agentchat.conditions import MaxMessageTermination
-    
-    # Assuming you have your vector memory instance
-    # vector_memory = LobeVectorMemory(...)
-    
-    # Create model client
-    model_client = OpenAIChatCompletionClient(
-        model="gpt-4",
-        api_key="your-api-key"
-    )
-    
-    # Create Expert with custom configurations for each lobe
-    expert = Expert(
-        name="ResearchExpert",
-        model_client=model_client,
-        vector_memory=vector_memory,  # Your vector memory instance
-        lobe1_config={
-            'keywords': ['data analysis', 'research methods', 'statistics'],
-            'temperature': 0.8,
-            'system_message': "You are a research methodology specialist. Focus on data collection, analysis methods, and statistical validity."
-        },
-        lobe2_config={
-            'keywords': ['critical thinking', 'synthesis', 'conclusions'],
-            'temperature': 0.6,
-            'system_message': "You are a critical reviewer and synthesizer. Challenge methodologies, identify limitations, and synthesize findings. Use 'CONCLUDE:' when ready to summarize."
-        },
-        max_rounds=8
-    )
-    
-    # Create another regular agent for comparison
-    from autogen_agentchat.agents import AssistantAgent
-    coordinator = AssistantAgent(
-        name="Coordinator",
-        model_client=model_client,
-        system_message="You coordinate research discussions and ensure all perspectives are considered."
-    )
-    
-    # Create a team that includes the Expert
-    research_team = RoundRobinGroupChat(
-        participants=[coordinator, expert],  # Expert appears as a single agent
-        termination_condition=MaxMessageTermination(max_messages=6)
-    )
-    
-    # Run a task - the Expert will internally deliberate before responding
-    result = await research_team.run(
-        task="What are the best practices for conducting user research in software development?"
-    )
-    
-    return result
