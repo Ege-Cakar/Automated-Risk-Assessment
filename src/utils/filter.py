@@ -1,154 +1,94 @@
-import sys
 import re
-import logging
-from datetime import datetime
-from typing import TextIO
+import sys
+from io import StringIO
+from contextlib import contextmanager
 
-# Suppress ALL the noisy loggers
-def suppress_all_noise():
-    """Suppress all known noisy loggers"""
-    noisy_loggers = [
-        "autogen_core",
-        "httpx", 
-        "src.custom_autogen_code.expert",
-        "sentence_transformers.SentenceTransformer",
-        "chromadb.telemetry.product.posthog",
-        "chromadb",
-        "src.utils.db_loader",
-        "transformers",
-        "torch",
-        "urllib3",
-        "requests"
-    ]
+class SimpleMessageFilter:
+    """Extract only the actual agent messages from autogen output."""
     
-    for logger_name in noisy_loggers:
-        logger = logging.getLogger(logger_name)
-        logger.setLevel(logging.CRITICAL)
-        logger.disabled = True
-        logger.propagate = False
-
-class OutputFilter:
-    def __init__(self, 
-                 background_file: str = "full_output.log",
-                 clean_messages_file: str = "clean_messages.txt",
-                 auto_extract: bool = True):
-        
-        # Suppress all noise first
-        suppress_all_noise()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.background_file = f"src/text_files/{timestamp}_{background_file}"
-        self.clean_messages_file = f"src/text_files/{timestamp}_{clean_messages_file}"
-        self.auto_extract = auto_extract
-        self.original_stdout = sys.stdout
-        self.original_stderr = sys.stderr
-        
-        # Open background log file
-        self.bg_file = open(self.background_file, 'w', encoding='utf-8')
-        
-        print(f"🔧 Output filtering active:")
-        print(f"   📄 Full log: {self.background_file}")
-        print(f"   ✨ Clean messages: {self.clean_messages_file}")
-        print(f"   🤫 Console noise suppressed")
-        print("="*50)
-        
-    def __enter__(self):
-        sys.stdout = self
-        sys.stderr = self
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout = self.original_stdout
-        sys.stderr = self.original_stderr
-        self.bg_file.close()
-        
-        if self.auto_extract:
-            # Extract clean messages at the end
-            from log_processor import LogProcessor
-            messages = LogProcessor.extract_clean_messages(self.background_file, self.clean_messages_file)
-            
-            # Show summary
-            print(f"\n{'='*50}")
-            print(f"🎉 Conversation Complete!")
-            print(f"   📄 Full log: {self.background_file}")
-            print(f"   ✨ Clean messages: {self.clean_messages_file}")
-            print(f"   💬 Total messages: {len(messages)}")
-            print(f"{'='*50}")
-        
-    def write(self, text: str):
-        # Always save everything to background file
-        self.bg_file.write(text)
-        self.bg_file.flush()
-        
-        # Filter what we show on console
-        self.filter_and_display(text)
-        
-        return len(text)
+    def __init__(self):
+        self.messages = []
+        self.current_agent = None
     
-    def flush(self):
-        self.original_stdout.flush()
-        self.bg_file.flush()
+    @contextmanager
+    def filter_output(self):
+        """Context manager to capture and filter output."""
+        # Capture stdout
+        old_stdout = sys.stdout
+        captured_output = StringIO()
+        sys.stdout = captured_output
         
-    def filter_and_display(self, text: str):
-        """Simple filtering - just hide noise and show important events"""
-        
-        # Hide all the noise
-        noise_patterns = [
-            "INFO:",
-            "ERROR:",
-            "WARNING:", 
-            "DEBUG:",
-            "HTTP Request:",
-            "Publishing message",
-            "Calling message handler",
-            "Use pytorch device_name:",
-            "Load pretrained SentenceTransformer:",
-            "Anonymized telemetry enabled",
-            "Failed to send telemetry event",
-            "Scanning folder:",
-            "Found",
-            "File collection complete:",
-            "No new files to process!",
-            "Files added to memory",
-            "---------- TextMessage"  # Hide message headers, we'll extract later
-        ]
-        
-        if any(noise in text for noise in noise_patterns):
-            return
+        try:
+            yield self
+        finally:
+            # Restore stdout
+            sys.stdout = old_stdout
             
-        # Show important events
-        if "Initialized both lobes for Expert" in text:
-            agent_match = re.search(r"Expert (\w+)", text)
+            # Process the captured output
+            output = captured_output.getvalue()
+            self._extract_messages(output)
+            self._print_clean_messages()
+    
+    def _extract_messages(self, output):
+        """Extract clean messages from the raw output."""
+        lines = output.split('\n')
+        
+        for line in lines:
+            # Look for agent headers like "---------- TextMessage (agent_name) ----------"
+            agent_match = re.search(r'---------- TextMessage \(([^)]+)\) ----------', line)
             if agent_match:
-                agent_name = agent_match.group(1).replace('_', ' ').title()
-                self.show_simple(f"✅ {agent_name} initialized")
-                return
+                self.current_agent = agent_match.group(1)
+                continue
             
-        if "Starting internal deliberation" in text:
-            agent_match = re.search(r"Expert (\w+)", text)
-            if agent_match:
-                agent_name = agent_match.group(1).replace('_', ' ').title()
-                self.show_simple(f"🤔 {agent_name} thinking...")
-                return
+            # Skip INFO logs and other noise
+            if line.startswith('INFO:') or line.startswith('ERROR:') or line.startswith('WARNING:'):
+                continue
+            
+            # Skip empty lines and autogen internals
+            if not line.strip() or 'Publishing message' in line or 'Calling message handler' in line:
+                continue
+            
+            # If we have a current agent and this looks like message content
+            if self.current_agent and line.strip():
+                # Check if this is the start of a new message block
+                if not any(skip_phrase in line for skip_phrase in [
+                    'huggingface/tokenizers',
+                    'models_usage',
+                    'payload',
+                    'delivery_stage'
+                ]):
+                    self.messages.append({
+                        'agent': self.current_agent,
+                        'content': line.strip()
+                    })
+    
+    def _print_clean_messages(self):
+        """Print only the clean conversation."""
+        print("\n" + "="*80)
+        print("🎯 CLEAN CONVERSATION OUTPUT")
+        print("="*80)
+        
+        current_agent = None
+        current_content = []
+        
+        for msg in self.messages:
+            if msg['agent'] != current_agent:
+                # Print previous agent's complete message
+                if current_agent and current_content:
+                    print(f"\n🤖 {current_agent.upper()}:")
+                    print("-" * 40)
+                    print('\n'.join(current_content))
                 
-        if "completed deliberation" in text:
-            agent_match = re.search(r"Expert (\w+)", text)
-            if agent_match:
-                agent_name = agent_match.group(1).replace('_', ' ').title()
-                self.show_simple(f"✅ {agent_name} completed analysis")
-                return
-            
-        # Show anything else that might be important
-        if text.strip() and len(text.strip()) > 10:
-            # Only show if it's not just whitespace or short fragments
-            if not any(skip in text.lower() for skip in ['payload', 'delivery_stage', 'sender', 'receiver']):
-                self.original_stdout.write(text)
-    
-    def show_simple(self, message: str):
-        """Show simple status messages"""
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        output = f"[{timestamp}] {message}\n"
-        self.original_stdout.write(output)
-        self.original_stdout.flush()
-
-if __name__ == "__main__":
-    main()
+                # Start new agent
+                current_agent = msg['agent']
+                current_content = [msg['content']]
+            else:
+                current_content.append(msg['content'])
+        
+        # Print the last agent's message
+        if current_agent and current_content:
+            print(f"\n🤖 {current_agent.upper()}:")
+            print("-" * 40)
+            print('\n'.join(current_content))
+        
+        print("\n" + "="*80)
