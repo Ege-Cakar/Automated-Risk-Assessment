@@ -203,25 +203,45 @@ class Expert(BaseChatAgent):
             
         Returns:
             Response containing the expert's synthesized conclusion and/or handoff
-        """
+        """    
+        # Handle agent selection/probing phase (what Swarm does internally)
         if not messages:
-            logger.warning(f"Expert {self.name} received empty message list")
-            msg = f"Expert {self.name} called. Messages count: {len(messages)}. "
+            logger.info(f"Agent selection probe for {self.name}")
+            # Don't start internal deliberation for probes - just indicate readiness
             return Response(
                 chat_message=TextMessage(
-                    content=msg,
+                    content="",  # Empty response for selection phase
                     source=self.name
                 )
             )
-    
+        
+        # Filter for actual content messages (like AssistantAgent does)
+        meaningful_messages = []
+        for msg in messages:
+            if isinstance(msg, TextMessage) and msg.content and msg.content.strip():
+                meaningful_messages.append(msg)
+        
+        if not meaningful_messages:
+            logger.info(f"No meaningful content for {self.name}")
+            return Response(
+                chat_message=TextMessage(
+                    content="Please provide a specific query to analyze.",
+                    source=self.name
+                )
+            )
+        
+        # Now proceed with actual processing
+        logger.info(f"Processing actual content for {self.name}")
+        
         # Reset pending handoff
         self._pending_handoff = None
         
         # Ensure lobes are initialized
         await self._initialize_lobes()
         
-        # Extract the query from the last message
-        last_message = messages[-1]
+        # Use the last meaningful message
+        last_message = meaningful_messages[-1]
+        
         if isinstance(last_message, TextMessage):
             query = last_message.content
         else:
