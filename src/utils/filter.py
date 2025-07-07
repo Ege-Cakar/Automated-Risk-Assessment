@@ -150,27 +150,5 @@ class OutputFilter:
         self.original_stdout.write(output)
         self.original_stdout.flush()
 
-# Super simple usage - just wrap your existing code:
-def main():
-    with OutputFilter("debug.log", "clean_messages.txt"):
-        # ALL your existing AutoGen code here - zero changes needed
-        print("Starting GHIP Risk Assessment...")
-        
-        # Your existing imports and setup
-        # team = SelectorGroupChatManager(...)
-        # result = await team.run(...)
-        pass
-
-# Alternative: Manual extraction if you already have a log file
-def extract_from_existing_log():
-    from log_processor import LogProcessor
-    messages = LogProcessor.extract_clean_messages("your_log_file.log", "extracted_messages.txt")
-    print(f"Extracted {len(messages)} messages")
-
-# Alternative: Watch log file in real-time (run in separate terminal)
-def watch_log_live():
-    from log_processor import LogProcessor
-    LogProcessor.watch_and_extract("your_log_file.log", "live_messages.txt")
-
 if __name__ == "__main__":
     main()
