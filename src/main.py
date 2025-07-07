@@ -5,7 +5,7 @@ import os
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.conditions import ExternalTermination, TextMentionTermination
-from autogen_agentchat.teams import RoundRobinGroupChat, SelectorGroupChat
+from autogen_agentchat.teams import RoundRobinGroupChat, SelectorGroupChat, Swarm
 from autogen_agentchat.ui import Console
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_ext.memory.chromadb import ChromaDBVectorMemory, PersistentChromaDBVectorMemoryConfig
@@ -133,9 +133,9 @@ async def main():
                 """
                 await Console(keyword_generator_agent.run_stream(task=keyword_gen_task))  # Stream the messages to the console. 
 
-            # Read the src/text_files/guide_words.txt file
-            with open("src/text_files/guide_words.txt", "r") as f:
-                guide_words = f.read().splitlines()
+            # Read the src/text_files/keywords.txt file
+            with open("src/text_files/keywords.txt", "r") as f:
+                swift_guide_words = f.read().splitlines()
 
             swift_agents = []
 
@@ -185,17 +185,6 @@ async def main():
                 'temperature': 0.4,
             }
 
-            swift_coordinator = Expert(
-                "swift_coordinator",
-                model_client=base_client,
-                system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=guide_words),
-                vector_memory=memory,
-                lobe1_config=swift_lobe1_config,
-                lobe2_config=swift_lobe2_config,
-            )
-
-            swift_agents.append(swift_coordinator)
-
             summary_agent = Expert(
                 name="summary_agent",
                 model_client=base_client,
@@ -210,6 +199,24 @@ async def main():
                     'temperature': 0.2,  # Even lower for final synthesis
                 },
             )
+
+
+            possible_handoff_list = [summary_agent]
+
+            for expert in approved_experts:
+                possible_handoff_list.append(expert["name"])
+
+            swift_coordinator = Expert(
+                "swift_coordinator",
+                model_client=base_client,
+                system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=swift_guide_words),
+                vector_memory=memory,
+                lobe1_config=swift_lobe1_config,
+                lobe2_config=swift_lobe2_config,
+                handoffs=possible_handoff_list
+            )
+
+            swift_agents.append(swift_coordinator)
 
             swift_agents.append(summary_agent)
 
@@ -228,14 +235,14 @@ async def main():
                         'keywords': expert["keywords"],
                         'temperature': 0.4,
                     },
+                    handoffs=[swift_coordinator]
                 )
                 swift_agents.append(expert_agent)
                 print(f"Added {expert['name']} to team")
             
             # Create the team
-            SwiftTeam = SelectorGroupChat(
+            SwiftTeam = Swarm(
                 participants=swift_agents, 
-                model_client=base_client,
                 termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"),
                 max_turns=60  # Safety net
             )
