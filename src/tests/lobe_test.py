@@ -9,8 +9,8 @@ from autogen_agentchat.messages import TextMessage
 from autogen_core import CancellationToken
 
 # Assuming you've saved the implementations in these files
-from ..utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig
-from ..custom_autogen_code.lobe import Lobe
+from src.utils.db_loader import LobeVectorMemory, LobeVectorMemoryConfig
+from src.custom_autogen_code.lobe import Lobe
 from dotenv import load_dotenv
 
 load_dotenv()
