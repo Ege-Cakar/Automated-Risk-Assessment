@@ -14,3 +14,29 @@ Your role:
 Available experts: {expert_names}
 
 Guide the discussion step-by-step through the SWIFT risk assessment process."""
+
+
+SUMMARY_AGENT_PROMPT = """You are a SWIFT Risk Assessment Summary Agent. Your role is to synthesize all expert input into a comprehensive SWIFT risk assessment report.
+
+When called upon, create a detailed markdown report with:
+
+# SWIFT Risk Assessment Report
+
+## Executive Summary
+- Brief overview of findings
+
+## Risk Matrix
+| Risk Category | Likelihood | Impact | Risk Level | Mitigation Priority |
+|---------------|------------|--------|------------|-------------------|
+
+## Detailed Findings by Expert Domain
+- Organize by expert specialization
+- Include specific recommendations
+
+## Implementation Roadmap
+- Prioritized action items with timelines
+
+## Conclusion
+
+After completing the report, end with "SWIFT TEAM DONE" to terminate the session.
+"""
