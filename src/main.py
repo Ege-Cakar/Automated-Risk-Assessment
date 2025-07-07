@@ -12,13 +12,14 @@ from autogen_ext.memory.chromadb import ChromaDBVectorMemory, PersistentChromaDB
 from dotenv import load_dotenv
 from typing import Set
 from src.utils.expert_gen_utils import CombinedTerminationCondition, ExpertTracker, create_expert_tool, save_expert_tool
-from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT, SUMMARY_AGENT_PROMPT
+from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT, SUMMARY_AGENT_PROMPT, KEYWORD_GENERATOR_PROMPT
 from src.utils.db_loader import LobeVectorMemory, add_files_from_folder
 from src.custom_autogen_code.expert import Expert
 from src.utils.paths import VECTORDB_PATH, paths, DOCUMENTS_DIR
 from src.utils.db_loader import LobeVectorMemoryConfig
 import logging
 from src.utils.filter import SimpleMessageFilter
+from src.utils.keyword_save import save_keywords, save_keywords_tool
 
 # Fix multiprocessing issues
 if __name__ == '__main__':
@@ -53,6 +54,13 @@ organizer_critic_agent = AssistantAgent(
     model_client=base_client,
     tools=[save_expert_tool],
     system_message=CRITIC_PROMPT,
+)
+
+keyword_generator_agent = AssistantAgent(
+    "keyword_generator_agent",
+    model_client=base_client,
+    tools=[save_keywords_tool],
+    system_message=KEYWORD_GENERATOR_PROMPT,
 )
 
 # Initialize ChromaDB memory with custom config     
@@ -103,15 +111,31 @@ async def main():
 
                 Information on SWIFT steps: {swift_info}
 
-                You will have access to relevant data to help with keyword generation and expert identification.
-                """
+                You will have access to relevant data to help with keyword generation and expert identification. 
+                """#TODO: Feed data from the database here?
                 await Console(organizing_team.run_stream(task=expert_gen_task))  # Stream the messages to the console.
+
 
             # await team.close() # No need when using Console wrapper
 
             # Read text_files/approved_experts.json
             with open("src/text_files/approved_experts.json", "r") as f:
                 approved_experts = json.load(f)
+
+
+            if generate_from_scratch:
+                # Generate the list of guide/key words: 
+                keyword_gen_task = f"""Generate a list of guide words for SWIFT based on the following:
+
+                User Request: {dummy_req}
+
+                Information on SWIFT steps: {swift_info}
+                """
+                await Console(keyword_generator_agent.run_stream(task=keyword_gen_task))  # Stream the messages to the console. 
+
+            # Read the src/text_files/guide_words.txt file
+            with open("src/text_files/guide_words.txt", "r") as f:
+                guide_words = f.read().splitlines()
 
             swift_agents = []
 
@@ -164,7 +188,7 @@ async def main():
             swift_coordinator = Expert(
                 "swift_coordinator",
                 model_client=base_client,
-                system_message=SWIFT_COORDINATOR_PROMPT,
+                system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=guide_words),
                 vector_memory=memory,
                 lobe1_config=swift_lobe1_config,
                 lobe2_config=swift_lobe2_config,

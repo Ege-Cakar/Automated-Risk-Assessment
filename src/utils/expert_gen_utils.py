@@ -197,10 +197,19 @@ def func_save_expert(
         print(f"Expert {expert_name} already exists, skipping...")
         return {"status": "duplicate", "name": expert_name}
     
+    handoff_instructions = """
+    **IMPORTANT TRANSFER PROTOCOL:** 
+    After completing your analysis, you must indicate readiness to return control by ending your response with:
+    "My analysis is complete. The coordinator should now determine the next steps." Then, utilize a tool call to pass it back to the coordinator.
+    
+    Do NOT attempt to transfer to other agents directly. Only the coordinator manages transfers.
+    """
+
+    full_system_prompt = expert_system_prompt + "\n\n" + handoff_instructions
     # Add new expert
     new_expert = {
         "name": expert_name,
-        "system_prompt": expert_system_prompt,
+        "system_prompt": full_system_prompt,
         "keywords": expert_keywords
     }
     
