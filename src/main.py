@@ -12,13 +12,13 @@ from autogen_ext.memory.chromadb import ChromaDBVectorMemory, PersistentChromaDB
 from dotenv import load_dotenv
 from typing import Set
 from src.utils.expert_gen_utils import CombinedTerminationCondition, ExpertTracker, create_expert_tool, save_expert_tool
-from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT
+from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT, SUMMARY_AGENT_PROMPT
 from src.utils.db_loader import LobeVectorMemory, add_files_from_folder
 from src.custom_autogen_code.expert import Expert
 from src.utils.paths import VECTORDB_PATH, paths, DOCUMENTS_DIR
 from src.utils.db_loader import LobeVectorMemoryConfig
 import logging
-from src.utils.filter import OutputFilter
+from src.utils.filter import SimpleMessageFilter
 
 # Fix multiprocessing issues
 if __name__ == '__main__':
@@ -74,160 +74,160 @@ organizing_team = RoundRobinGroupChat(
 )
 
 async def main():
-    #with OutputFilter():
-    try:
-        # Add files to memory
-        await add_files_from_folder(memory, str(DOCUMENTS_DIR))
-        print("Files added to memory")
-        
-        await organizing_team.reset()  # Reset the team for a new task.
-        # async for message in team.run_stream(task="Generate a team of experts for risk assessment."):  # type: ignore
-        #     if isinstance(message, TaskResult):
-        #         print("Stop Reason:", message.stop_reason)
-        #     else:
-        #         print(message)
-        # or:
-        # Read the requirement and SWIFT method info files
-        with open("src/text_files/dummy_req.txt", "r") as f:
-            dummy_req = f.read()
-        
-        with open("src/text_files/swift_info.txt", "r") as f:
-            swift_info = f.read()
-        
-        
-        if generate_from_scratch:
-            # Create the task request string
-            expert_gen_task = f"""Generate a team of experts for risk assessment based on the following:
+    with SimpleMessageFilter().filter_output():
+        try:
+            # Add files to memory
+            await add_files_from_folder(memory, str(DOCUMENTS_DIR))
+            print("Files added to memory")
+            
+            await organizing_team.reset()  # Reset the team for a new task.
+            # async for message in team.run_stream(task="Generate a team of experts for risk assessment."):  # type: ignore
+            #     if isinstance(message, TaskResult):
+            #         print("Stop Reason:", message.stop_reason)
+            #     else:
+            #         print(message)
+            # or:
+            # Read the requirement and SWIFT method info files
+            with open("src/text_files/dummy_req.txt", "r") as f:
+                dummy_req = f.read()
+            
+            with open("src/text_files/swift_info.txt", "r") as f:
+                swift_info = f.read()
+            
+            
+            if generate_from_scratch:
+                # Create the task request string
+                expert_gen_task = f"""Generate a team of experts for risk assessment based on the following:
 
-            User Request: {dummy_req}
+                User Request: {dummy_req}
 
-            Information on SWIFT steps: {swift_info}
+                Information on SWIFT steps: {swift_info}
 
-            You will have access to relevant data to help with keyword generation and expert identification.
-            """
-            await Console(organizing_team.run_stream(task=expert_gen_task))  # Stream the messages to the console.
+                You will have access to relevant data to help with keyword generation and expert identification.
+                """
+                await Console(organizing_team.run_stream(task=expert_gen_task))  # Stream the messages to the console.
 
-        # await team.close() # No need when using Console wrapper
+            # await team.close() # No need when using Console wrapper
 
-        # Read text_files/approved_experts.json
-        with open("src/text_files/approved_experts.json", "r") as f:
-            approved_experts = json.load(f)
+            # Read text_files/approved_experts.json
+            with open("src/text_files/approved_experts.json", "r") as f:
+                approved_experts = json.load(f)
 
-        swift_agents = []
+            swift_agents = []
 
-        swift_expert_keywords = [
-            "SWIFT",
-            "Risk Assessment",
-            "Risk Management",
-            "Financial Crime Compliance",
-            "Sanctions Screening",
-            "Anti-Money Laundering (AML)",
-            "Counter-Terrorist Financing (CTF)",
-            "Know Your Customer (KYC)",
-            "Cybersecurity",
-            "Fraud Detection",
-            "Operational Risk",
-            "Third-Party Risk Management",
-            "Compliance Framework",
-            "Regulatory Compliance",
-            "Financial Messaging",
-            "Secure Financial Communications",
-            "Payment Systems",
-            "Cross-Border Payments",
-            "Securities Settlement",
-            "Trade Finance",
-            "Data Analytics",
-            "Risk Mitigation",
-            "Threat Analysis",
-            "Vulnerability Assessment",
-            "Incident Response",
-            "Business Continuity",
-            "SWIFT Customer Security Programme (CSP)",
-            "SWIFT gpi",
-            "ISO 20022",
-            "Financial Instrument",
-            "Correspondent Banking",
-            "Payment Tracking",
-            "Transaction Monitoring"
-        ]
+            swift_expert_keywords = [
+                "SWIFT",
+                "Risk Assessment",
+                "Risk Management",
+                "Financial Crime Compliance",
+                "Sanctions Screening",
+                "Anti-Money Laundering (AML)",
+                "Counter-Terrorist Financing (CTF)",
+                "Know Your Customer (KYC)",
+                "Cybersecurity",
+                "Fraud Detection",
+                "Operational Risk",
+                "Third-Party Risk Management",
+                "Compliance Framework",
+                "Regulatory Compliance",
+                "Financial Messaging",
+                "Secure Financial Communications",
+                "Payment Systems",
+                "Cross-Border Payments",
+                "Securities Settlement",
+                "Trade Finance",
+                "Data Analytics",
+                "Risk Mitigation",
+                "Threat Analysis",
+                "Vulnerability Assessment",
+                "Incident Response",
+                "Business Continuity",
+                "SWIFT Customer Security Programme (CSP)",
+                "SWIFT gpi",
+                "ISO 20022",
+                "Financial Instrument",
+                "Correspondent Banking",
+                "Payment Tracking",
+                "Transaction Monitoring"
+            ]
 
-        swift_lobe1_config = {
-            'keywords': swift_expert_keywords,
-            'temperature': 0.6,
-        }
+            swift_lobe1_config = {
+                'keywords': swift_expert_keywords,
+                'temperature': 0.6,
+            }
 
-        swift_lobe2_config = {
-            'keywords': swift_expert_keywords,
-            'temperature': 0.4,
-        }
+            swift_lobe2_config = {
+                'keywords': swift_expert_keywords,
+                'temperature': 0.4,
+            }
 
-        swift_coordinator = Expert(
-            "swift_coordinator",
-            model_client=base_client,
-            system_message=SWIFT_COORDINATOR_PROMPT,
-            vector_memory=memory,
-            lobe1_config=swift_lobe1_config,
-            lobe2_config=swift_lobe2_config,
-        )
-
-        swift_agents.append(swift_coordinator)
-
-        summary_agent = Expert(
-            name="summary_agent",
-            model_client=base_client,
-            system_message=SUMMARY_AGENT_PROMPT,
-            vector_memory=memory,
-            lobe1_config={
-                'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
-                'temperature': 0.3,  # Lower temperature for structured output
-            },
-            lobe2_config={
-                'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
-                'temperature': 0.2,  # Even lower for final synthesis
-            },
-        )
-
-        swift_agents.append(summary_agent)
-
-        # Loop over approved experts to create an agent for each of them, then assemble a team
-        for expert in approved_experts:
-            expert_agent = Expert(
-                name=expert["name"].lower().replace(" ", "_").replace("-","_"),
+            swift_coordinator = Expert(
+                "swift_coordinator",
                 model_client=base_client,
-                system_message=f"{expert['system_prompt']}\n\nKeep responses focused and concise (2-3 paragraphs). Always relate back to the specific risk assessment question.",
+                system_message=SWIFT_COORDINATOR_PROMPT,
+                vector_memory=memory,
+                lobe1_config=swift_lobe1_config,
+                lobe2_config=swift_lobe2_config,
+            )
+
+            swift_agents.append(swift_coordinator)
+
+            summary_agent = Expert(
+                name="summary_agent",
+                model_client=base_client,
+                system_message=SUMMARY_AGENT_PROMPT,
                 vector_memory=memory,
                 lobe1_config={
-                    'keywords': expert["keywords"],
-                    'temperature': 0.6,
+                    'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
+                    'temperature': 0.3,  # Lower temperature for structured output
                 },
                 lobe2_config={
-                    'keywords': expert["keywords"],
-                    'temperature': 0.4,
+                    'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
+                    'temperature': 0.2,  # Even lower for final synthesis
                 },
             )
-            swift_agents.append(expert_agent)
-            print(f"Added {expert['name']} to team")
-        
-        # Create the team
-        SwiftTeam = SelectorGroupChat(
-            participants=swift_agents, 
-            model_client=base_client,
-            termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"),
-            max_turns=60  # Safety net
-        )
-        
-        await Console(SwiftTeam.run_stream(task=dummy_req))  # Stream the messages to the console.
-        
-    except Exception as e:
-        print(f"Error in main function: {e}")
-        raise
-    finally:
-        try:
-            if 'memory' in globals():
-                import gc
-                gc.collect()
-        except Exception as cleanup_error:
-            print(f"Error during cleanup: {cleanup_error}")
+
+            swift_agents.append(summary_agent)
+
+            # Loop over approved experts to create an agent for each of them, then assemble a team
+            for expert in approved_experts:
+                expert_agent = Expert(
+                    name=expert["name"].lower().replace(" ", "_").replace("-","_"),
+                    model_client=base_client,
+                    system_message=f"{expert['system_prompt']}\n\nKeep responses focused and concise (2-3 paragraphs). Always relate back to the specific risk assessment question.",
+                    vector_memory=memory,
+                    lobe1_config={
+                        'keywords': expert["keywords"],
+                        'temperature': 0.6,
+                    },
+                    lobe2_config={
+                        'keywords': expert["keywords"],
+                        'temperature': 0.4,
+                    },
+                )
+                swift_agents.append(expert_agent)
+                print(f"Added {expert['name']} to team")
+            
+            # Create the team
+            SwiftTeam = SelectorGroupChat(
+                participants=swift_agents, 
+                model_client=base_client,
+                termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"),
+                max_turns=60  # Safety net
+            )
+            
+            await Console(SwiftTeam.run_stream(task=dummy_req))  # Stream the messages to the console.
+            
+        except Exception as e:
+            print(f"Error in main function: {e}")
+            raise
+        finally:
+            try:
+                if 'memory' in globals():
+                    import gc
+                    gc.collect()
+            except Exception as cleanup_error:
+                print(f"Error during cleanup: {cleanup_error}")
     
 
 asyncio.run(main())
