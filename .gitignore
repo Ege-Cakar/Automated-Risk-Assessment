@@ -5,3 +5,4 @@ database
 src/database_query_example.py
 src/utils/db_summarizer.py
 .DS_Store
+description.md
