@@ -207,13 +207,10 @@ async def main():
             },
         )
 
-        swift_coordinator = Expert(
+        swift_coordinator = AssistantAgent(
             "swift_coordinator",
             model_client=base_client,
             system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=swift_guide_words),
-            vector_memory=memory,
-            lobe1_config=swift_lobe1_config,
-            lobe2_config=swift_lobe2_config,
         )
 
         swift_agents.append(swift_coordinator)
