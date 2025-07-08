@@ -52,9 +52,34 @@ class SWIFTStatusFormatter(logging.Formatter):
             "GroupChatRequestPublish"
         ])
     
+    def _extract_message_content(self, msg):
+        """Extract the actual message content from LLMCall logs"""
+        try:
+            # Look for content in various formats
+            patterns = [
+                r'"content":\s*"([^"]{0,100})',  # JSON content field
+                r'content=\'([^\']{0,100})',     # TextMessage content
+                r'TextMessage\([^)]*content=\'([^\']{0,100})',  # Nested TextMessage
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, msg)
+                if match:
+                    content = match.group(1)
+                    # Clean up escaped characters
+                    content = content.replace('\\n', ' ').replace('\\t', ' ')
+                    # Truncate and add ellipsis if needed
+                    if len(content) >= 80:
+                        content = content[:80] + "..."
+                    return content
+                    
+        except Exception:
+            pass
+        return None
+    
     def _format_expert_message(self, timestamp, record, msg):
         # Extract expert name
-        expert_match = re.search(r'(multi_factor_authentication_specialist|data_encryption|identity_proofing|privacy_and_regulatory|application_security|audit_logging|network_and_infrastructure|insider_threat|third_party_integration|summary_agent)', msg)
+        expert_match = re.search(r'(multi_factor_authentication_specialist|data_encryption|identity_proofing|privacy_and_regulatory|application_security|audit_logging|network_and_infrastructure|insider_threat|third_party_integration|summary_agent|swift_coordinator)', msg)
         
         if expert_match:
             expert = expert_match.group(1).replace('_', ' ').title()
@@ -84,7 +109,18 @@ class SWIFTStatusFormatter(logging.Formatter):
             token_match = re.search(r'prompt_tokens.*?(\d+).*?completion_tokens.*?(\d+)', msg)
             if token_match:
                 prompt_tokens, completion_tokens = token_match.groups()
-                return f"🤖 [{timestamp}] AI Response: {prompt_tokens}→{completion_tokens} tokens"
+                
+                # Try to extract message content
+                content_preview = self._extract_message_content(msg)
+                if content_preview:
+                    return f"🤖 [{timestamp}] AI Response ({prompt_tokens}→{completion_tokens} tokens): \"{content_preview}\""
+                else:
+                    return f"🤖 [{timestamp}] AI Response: {prompt_tokens}→{completion_tokens} tokens"
+            else:
+                # Still try to show content even without token info
+                content_preview = self._extract_message_content(msg)
+                if content_preview:
+                    return f"🤖 [{timestamp}] AI Call #{self.llm_calls}: \"{content_preview}\""
         
         return f"🤖 [{timestamp}] AI Processing..."
     

@@ -19,6 +19,7 @@ from src.utils.paths import VECTORDB_PATH, paths, DOCUMENTS_DIR
 from src.utils.db_loader import LobeVectorMemoryConfig
 from src.utils.keyword_save import save_keywords, save_keywords_tool
 from src.utils.filter import SWIFTStatusFormatter, setup_swift_logging, PeriodicStatusLogger
+from autogen_core.models import ModelInfo
 
 # Fix multiprocessing issues
 if __name__ == '__main__':
@@ -38,10 +39,12 @@ if generate_from_scratch:
         f.write("[]")
 
 base_client = OpenAIChatCompletionClient(
-    model="o4-mini",
+    model="gemini-2.5-pro",
+    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-pro")
 )
 deterministic_client = OpenAIChatCompletionClient(
-    model="o4-mini"
+    model="gemini-2.5-pro",
+    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-pro")
 )
 
 organizer_agent = AssistantAgent(
@@ -85,7 +88,7 @@ organizing_team = RoundRobinGroupChat(
 
 async def main():
     status_tracker = setup_swift_logging()
-    periodic_logger = PeriodicStatusLogger(interval=60) 
+    periodic_logger = PeriodicStatusLogger(interval=120) 
     periodic_logger.start(status_tracker)
     try:
         # Add files to memory
