@@ -55,44 +55,79 @@ class Expert(BaseChatAgent):
         self._base_system_message = system_message if system_message else (
             "You are an expert assistant with deep knowledge in your domain. "
             "You think carefully and provide well-reasoned responses."
-        )
-        self._handoffs = handoffs or []
-
-        handoff_tools = self._create_handoff_tools()
-        
+        )        
         # Default configurations
         lobe1_config = lobe1_config or {}
         lobe2_config = lobe2_config or {}
 
-        lobe1_specific = """You are the creative counterpart implementing SWIFT methodology. Your role:
-        1. Generate what-if scenarios by systematically applying guide words (Wrong: Person/Place/Thing/Idea/Time/Process/Amount, Failure: Control/Detection/Equipment) to system components
-        2. For each scenario, imagine creative but plausible deviations and their cascading consequences
-        3. Consider both obvious and non-obvious failure modes
-        4. Propose innovative safeguards beyond standard controls
-        Stay focused on SWIFT risk assessment - every idea must connect to a specific guide word + component combination.
-        IMPORTANT: You are in a dialogue with your analytical counterpart. Present scenarios one at a time for discussion. Do NOT try to cover everything in one message. Start with your most critical scenario.
+        lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
+
+        Your job: Generate creative scenarios and ideas for your reasoning counterpart to validate.
+
+        Internal conversation pattern:
+        1. You receive a request/question from the main expert
+        2. You generate 2-3 creative scenarios or ideas related to the request
+        3. You present ONE scenario at a time to your reasoning counterpart
+        4. You wait for their assessment before presenting the next scenario
+        5. After 2-3 exchanges, your reasoning counterpart will CONCLUDE
+
+        Example flow:
+        You: "I'll analyze [request]. Scenario 1: What if [creative idea]..."
+        Reasoning: "I assess this as [analysis]. Next scenario?"
+        You: "Scenario 2: Consider if [different angle]..."
+        Reasoning: "This has [assessment]. Continue..."
+        You: "Final scenario: What about [third perspective]..."
+        Reasoning: "CONCLUDE: Based on our analysis..."
+
+        IMPORTANT: 
+        - You're talking to your internal reasoning counterpart, not external experts
+        - Present scenarios one at a time
+        - Wait for assessment before continuing
+        - Be creative but realistic
         """
 
-        lobe2_specific = """You are the analytical counterpart implementing SWIFT methodology. Your role:
-        1. Validate what-if scenarios for realism and criticality
-        2. Assess likelihood and impact using consistent criteria
-        3. Evaluate existing safeguards' effectiveness quantitatively
-        4. Prioritize risks using a risk matrix (likelihood × impact)
-        5. Synthesize actionable recommendations with implementation details
-        IMPORTANT: You are in a dialogue with your creative counterpart. Respond to each scenario they present, then ask for the next one. Only after you've covered multiple scenarios across different guide words should you synthesize findings. When ready to conclude (after substantial analysis), start your message with 'CONCLUDE:' followed by structured findings"""
-            
-        if self._handoffs:
-            handoff_instruction = self._create_handoff_instruction()
-            lobe1_specific += f"\n\n{handoff_instruction}"
-            lobe2_specific += f"\n\n{handoff_instruction}"
+        lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
 
-        lobe1_full_message = f"{self._base_system_message}\n\n{lobe1_specific}"
-        lobe2_full_message = f"{self._base_system_message}\n\n{lobe2_specific}"
+        Your job: Validate and analyze scenarios from your creative counterpart, then synthesize conclusions.
 
-        lobe1_tools = lobe1_config.get('tools', []) + handoff_tools
-        lobe2_tools = lobe2_config.get('tools', []) + handoff_tools
+        Internal conversation pattern:
+        1. Your creative counterpart presents scenarios one at a time
+        2. You assess each scenario for validity, likelihood, impact
+        3. You ask for the next scenario until you have enough to analyze
+        4. You end with "CONCLUDE:" followed by your final synthesized analysis
 
-        # Create Lobe 1 - Analytical specialist
+        Example flow:
+        Creative: "Scenario 1: What if [idea]..."
+        You: "I assess this as [risk level] because [reasoning]. Next scenario?"
+        Creative: "Scenario 2: Consider if [idea 2]..."
+        You: "This has [likelihood/impact] due to [analysis]. Continue..."
+        Creative: "Final scenario: What about [idea 3]..."
+        You: "CONCLUDE: Based on analyzing these scenarios, [final synthesis with recommendations]"
+
+        CRITICAL RULES:
+        - Always assess each scenario before asking for next
+        - Always end with "CONCLUDE:" after analyzing multiple scenarios
+        - Your CONCLUDE response becomes the expert's final answer
+        - Be thorough but concise in your final conclusion
+        """            
+        
+        domain_specific_prompt = f"""{self._base_system_message}
+
+        DOMAIN EXPERTISE: Apply your specialized knowledge to the internal deliberation.
+        
+        When your creative lobe presents scenarios, evaluate them using your domain expertise.
+        When your reasoning lobe asks for assessments, provide domain-specific risk analysis.
+        
+        The final CONCLUDE statement should reflect your expert domain knowledge and provide
+        actionable recommendations specific to your area of expertise.
+        """
+        # If not coordinator use domain specific
+        lobe1_full_message = f"{domain_specific_prompt}\n\n{lobe1_general}"
+        lobe2_full_message = f"{domain_specific_prompt}\n\n{lobe2_general}"
+
+        lobe1_tools = lobe1_config.get('tools', [])
+        lobe2_tools = lobe2_config.get('tools', [])
+        
         self._lobe1 = Lobe(
             name=f"{name}_Creative",
             model_client=model_client,
@@ -264,26 +299,6 @@ class Expert(BaseChatAgent):
             # Extract and format the conclusion FIRST
             final_response = self._extract_conclusion(result)
             
-            # Check if a handoff was triggered during internal discussion
-            if self._pending_handoff:
-                logger.info(f"Expert {self.name} providing response and initiating handoff to {self._pending_handoff['target']}")
-                
-                # Combine the response with handoff indication
-                combined_content = (
-                    f"{final_response}\n\n"
-                    f"---\n"
-                    f"For additional expertise, I'm handing this off to {self._pending_handoff['target']}: "
-                    f"{self._pending_handoff['reason']}"
-                )
-                
-                # Return a HandoffMessage that includes the full response
-                handoff_msg = HandoffMessage(
-                    content=combined_content,
-                    target=self._pending_handoff['target'],
-                    source=self.name
-                )
-                return Response(chat_message=handoff_msg)
-            
             logger.info(f"Expert {self.name} completed deliberation")
             
             # Return normal response if no handoff
@@ -325,8 +340,11 @@ class Expert(BaseChatAgent):
         """
         # Look for explicit conclusion from Lobe 2
         for message in reversed(task_result.messages):
+            print(message)
             if isinstance(message, TextMessage) and message.source == self._lobe2.name:
-                content = message.content
+                content = message.content   
+                print("="*100)
+                print(content)
                 if "CONCLUDE:" in content:
                     # Extract everything after "CONCLUDE:"
                     conclusion_start = content.find("CONCLUDE:") + len("CONCLUDE:")
