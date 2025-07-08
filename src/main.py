@@ -12,7 +12,7 @@ from autogen_ext.memory.chromadb import ChromaDBVectorMemory, PersistentChromaDB
 from dotenv import load_dotenv
 from typing import Set
 from src.utils.expert_gen_utils import CombinedTerminationCondition, ExpertTracker, create_expert_tool, save_expert_tool
-from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT, SUMMARY_AGENT_PROMPT, KEYWORD_GENERATOR_PROMPT
+from src.text_files.system_prompts import ORGANIZER_PROMPT, CRITIC_PROMPT, SWIFT_COORDINATOR_PROMPT, SUMMARY_AGENT_PROMPT, KEYWORD_GENERATOR_PROMPT, SWIFT_SELECTOR_PROMPT
 from src.utils.db_loader import LobeVectorMemory, add_files_from_folder
 from src.custom_autogen_code.expert import Expert
 from src.utils.paths import VECTORDB_PATH, paths, DOCUMENTS_DIR
@@ -240,9 +240,15 @@ async def main():
                 swift_agents.append(expert_agent)
                 print(f"Added {expert['name']} to team")
             
+            
+            # Add the experts to the handoff list of the coordinator
+            swift_coordinator._handoffs = [expert["name"] for expert in approved_experts] + [summary_agent]
+
             # Create the team
-            SwiftTeam = Swarm(
+            SwiftTeam = SelectorGroupChat(
                 participants=swift_agents, 
+                model_client=base_client,
+                selector_prompt=SWIFT_SELECTOR_PROMPT,
                 termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"),
                 max_turns=60  # Safety net
             )
