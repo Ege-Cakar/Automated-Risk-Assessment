@@ -20,6 +20,8 @@ from src.utils.db_loader import LobeVectorMemoryConfig
 from src.utils.keyword_save import save_keywords, save_keywords_tool
 from src.utils.filter import SWIFTStatusFormatter, setup_swift_logging, PeriodicStatusLogger
 from autogen_core.models import ModelInfo
+from src.utils.save_report import save_report_tool
+from autogen_agentchat.conditions import FunctionCallTermination
 
 # Fix multiprocessing issues
 if __name__ == '__main__':
@@ -39,13 +41,21 @@ if generate_from_scratch:
         f.write("[]")
 
 base_client = OpenAIChatCompletionClient(
-    model="gemini-2.5-pro",
-    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-pro")
+    model="gemini-2.5-flash-preview-04-17",
+    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-flash", reasoning_effort="low")
 )
 deterministic_client = OpenAIChatCompletionClient(
-    model="gemini-2.5-pro",
-    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-pro")
+    model="gemini-2.5-flash-preview-04-17",
+    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-flash", reasoning_effort="low")
 )
+
+# base_client = OpenAIChatCompletionClient(
+#     model="gpt-4.1",
+# )
+# deterministic_client = OpenAIChatCompletionClient(
+#     model="gpt-4.1",
+# )
+
 
 organizer_agent = AssistantAgent(
     "organizer",
@@ -192,25 +202,23 @@ async def main():
             'temperature': 0.4,
         }
 
-        summary_agent = Expert(
+        swift_termination_condition = FunctionCallTermination(function_name="save_report")
+
+        summary_agent = AssistantAgent(
             name="summary_agent",
             model_client=base_client,
             system_message=SUMMARY_AGENT_PROMPT,
-            vector_memory=memory,
-            lobe1_config={
-                'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
-                'temperature': 0.3,  # Lower temperature for structured output
-            },
-            lobe2_config={
-                'keywords': ["SWIFT", "Risk Assessment", "Summary", "Report Generation"],
-                'temperature': 0.2,  # Even lower for final synthesis
-            },
+            tools=[save_report_tool]
         )
+
+        experts_to_provide_to_coordinator = []
+        for expert in approved_experts:
+            experts_to_provide_to_coordinator.append(expert["name"])
 
         swift_coordinator = AssistantAgent(
             "swift_coordinator",
             model_client=base_client,
-            system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=swift_guide_words),
+            system_message=SWIFT_COORDINATOR_PROMPT.format(guide_words=swift_guide_words, experts=experts_to_provide_to_coordinator),
         )
 
         swift_agents.append(swift_coordinator)
@@ -241,7 +249,7 @@ async def main():
             participants=swift_agents, 
             model_client=deterministic_client,
             selector_prompt=SWIFT_SELECTOR_PROMPT,
-            termination_condition=TextMentionTermination(text="SWIFT TEAM DONE"),
+            termination_condition=swift_termination_condition,
             max_turns=60  # Safety net
         )
         
