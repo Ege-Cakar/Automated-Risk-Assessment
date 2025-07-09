@@ -29,8 +29,7 @@ class Expert(BaseChatAgent):
         system_message: str = None,
         lobe1_config: Dict[str, Any] = None,
         lobe2_config: Dict[str, Any] = None,
-        handoffs: List[BaseChatAgent] = None,
-        max_rounds: int = 100,
+        max_rounds: int = 3,
         description: str = "An expert agent that internally deliberates using two specialized lobes, one for creativity and one for reasoning.",
         **kwargs
     ):
@@ -153,50 +152,7 @@ class Expert(BaseChatAgent):
         
         # Setup internal team
         self._setup_internal_team()
-    
-    def _create_handoff_tools(self) -> List[FunctionTool]:
-        """Create function tools for each handoff agent."""
-        tools = []
-        for target_name in self._handoffs:
-            def create_handoff_function(target: str):
-                async def handoff_to_agent(reason: str = "") -> str:
-                    """Mark that a handoff should occur after providing response."""
-                    # Store handoff info for later processing
-                    self._pending_handoff = {
-                        'target': target,
-                        'reason': reason,
-                    }
-                    return f"[Handoff to {target} noted - will complete after providing response]"
-                
-                return handoff_to_agent
-            
-            tool = FunctionTool(
-                create_handoff_function(target_name),
-                name=f"transfer_to_{target_name}",
-                description=f"Mark for transfer to {target_name} after responding."
-            )
-            tools.append(tool)
-        
-        return tools
 
-    
-    def _create_handoff_instruction(self) -> str:
-        """Create instruction text about available handoff agents."""
-        if not self._handoffs:
-            return ""
-        
-        handoff_list = [f"- {name}" for name in self._handoffs]
-        
-        return (
-            "When you determine that another agent could provide additional value after "
-            "your response, you can mark the conversation for handoff. You should ALWAYS "
-            "provide your complete analysis first, then use the transfer function to "
-            "indicate which agent should provide supplementary expertise.\n\n"
-            "Available agents for handoff:\n" + 
-            "\n".join(handoff_list) + 
-            "\n\nIMPORTANT: Always complete your full response before marking for handoff."
-        )
-        
     async def _initialize_lobes(self):
         """Initialize context for both lobes."""
         if not self._initialized:
@@ -296,12 +252,41 @@ class Expert(BaseChatAgent):
                 cancellation_token=cancellation_token
             )
             
-            # Extract and format the conclusion FIRST
+            hit_max_rounds = not any(
+                isinstance(msg, TextMessage) and 
+                msg.source == self._lobe2.name and 
+                "CONCLUDE:" in msg.content
+                for msg in result.messages
+            )
+        
+            if hit_max_rounds:
+                # Force a summary from Voice of Reason
+                logger.info(f"Max rounds reached, requesting summary from Voice of Reason")
+                summary_prompt = f"""You've reached the maximum deliberation rounds. 
+                            
+                Based on the entire discussion you've had with your creative counterpart, provide a final summary.
+
+                Start with "CONCLUDE: After extensive internal deliberation," and then:
+                1. Summarize the main ideas explored
+                2. Highlight key assessments made
+                3. Provide actionable insights despite not reaching a natural conclusion
+                4. Keep it professional and valuable for the end user"""
+                            
+                # Get summary from Voice of Reason
+                summary_messages = [TextMessage(content=summary_prompt, source="system")]
+                summary_response = await self._lobe2.on_messages(
+                    messages=summary_messages,
+                    cancellation_token=cancellation_token
+                )
+                
+                # Add the summary to our results
+                result.messages.append(summary_response.chat_message)
+            
+            # Extract and format the conclusion
             final_response = self._extract_conclusion(result)
             
             logger.info(f"Expert {self.name} completed deliberation")
             
-            # Return normal response if no handoff
             return Response(
                 chat_message=TextMessage(
                     content=final_response,
@@ -326,7 +311,6 @@ class Expert(BaseChatAgent):
                     source=self.name
                 )
             )
-
     
     def _extract_conclusion(self, task_result: TaskResult) -> str:
         """
@@ -338,33 +322,19 @@ class Expert(BaseChatAgent):
         Returns:
             The synthesized conclusion string
         """
-        # Look for explicit conclusion from Lobe 2
+        # Look for CONCLUDE: from Lobe 2 (should always be there now)
         for message in reversed(task_result.messages):
-            print(message)
             if isinstance(message, TextMessage) and message.source == self._lobe2.name:
                 content = message.content   
-                print("="*100)
-                print(content)
                 if "CONCLUDE:" in content:
                     # Extract everything after "CONCLUDE:"
                     conclusion_start = content.find("CONCLUDE:") + len("CONCLUDE:")
                     conclusion = content[conclusion_start:].strip()
                     return conclusion
         
-        # Fallback: If no explicit conclusion, synthesize from last few messages
-        logger.warning(f"No explicit conclusion found for Expert {self.name}, synthesizing...")
-        
-        synthesis_parts = ["Based on internal analysis:"]
-        
-        # Get last 3 messages for synthesis
-        recent_messages = task_result.messages
-        
-        for msg in recent_messages:
-            if isinstance(msg, TextMessage):
-                content = msg.content
-                synthesis_parts.append(f"- {content}")
-        
-        return "\n".join(synthesis_parts)
+        # This should rarely happen now
+        logger.error(f"No conclusion found for Expert {self.name}")
+        return "Unable to complete the analysis at this time."
     
     async def update_keywords(self, lobe1_keywords: List[str] = None, lobe2_keywords: List[str] = None):
         """
@@ -425,4 +395,4 @@ class Expert(BaseChatAgent):
     def produced_message_types(self) -> List[type[ChatMessage]]:
         """Message types that this agent can produce."""
         # Expert can produce text messages and potentially stop messages
-        return [TextMessage, StopMessage, HandoffMessage]
+        return [TextMessage, StopMessage]

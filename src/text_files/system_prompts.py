@@ -41,6 +41,9 @@ SWIFT_COORDINATOR_PROMPT = """You are the SWIFT Risk Assessment Coordinator mana
 **Transfer Pattern:**
 "[Expert name], I need you to analyze [component/area] specifically using the guide word '[specific guide word]'. Consider what could go wrong if [guide word explanation for context]. Please identify potential deviations, assess their likelihood and impact, and recommend safeguards."
 
+Here are the experts that are present in your team. Make sure to transfer to an expert via mentioning their name explicitly:
+{experts}
+
 Mentioning the agent you want to transfer to and ending your turn will be enough.
 
 **Coverage Tracking:**
@@ -78,9 +81,11 @@ Generate a structured report with:
 ## Implementation Roadmap
 [Prioritized actions with ownership and timelines]
 
-Complete your report with exactly: "SWIFT TEAM DONE" 
+This report needs to be saved using the 'save_report' tool. YOU MUST UTILIZE THIS TOOL.
 
-No transfers needed - your report ends the assessment."""
+After you have saved the report, you must reply with exactly: "SWIFT TEAM DONE". 
+
+YOU MUST COMPLETE YOUR REPORT WITH "SWIFT TEAM DONE". OTHERWISE, IT WILL GO ON FOREVER, AND THE COSTS INCURRED WILL BE YOUR FAULT."""
 
 KEYWORD_GENERATOR_PROMPT = """
 
