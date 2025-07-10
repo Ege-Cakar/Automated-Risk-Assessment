@@ -2,6 +2,7 @@ import asyncio
 import json
 import multiprocessing
 import os
+import json
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_agentchat.conditions import ExternalTermination, TextMentionTermination
@@ -18,10 +19,11 @@ from src.custom_autogen_code.expert import Expert
 from src.utils.paths import VECTORDB_PATH, paths, DOCUMENTS_DIR
 from src.utils.db_loader import LobeVectorMemoryConfig
 from src.utils.keyword_save import save_keywords, save_keywords_tool
-from src.utils.filter import SWIFTStatusFormatter, setup_swift_logging, PeriodicStatusLogger
+from src.utils.filter import setup_readable_logging
 from autogen_core.models import ModelInfo
 from src.utils.save_report import save_report_tool
 from autogen_agentchat.conditions import FunctionCallTermination
+import logging
 
 # Fix multiprocessing issues
 if __name__ == '__main__':
@@ -41,18 +43,34 @@ if generate_from_scratch:
         f.write("[]")
 
 base_client = OpenAIChatCompletionClient(
-    model="gemini-2.5-flash-preview-04-17",
-    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-flash", reasoning_effort="low")
-)
-deterministic_client = OpenAIChatCompletionClient(
-    model="gemini-2.5-flash-preview-04-17",
-    model_info=ModelInfo(vision=False, function_calling=True, json_output=False, structured_output=False, family="gemini-2.5-flash", reasoning_effort="low")
-)
+        model="gemini-2.5-flash",
+        model_info=ModelInfo(
+            vision=False,
+            function_calling=True,
+            json_output=False,
+            structured_output=False,
+            family="gemini-2.5-flash",
+            reasoning_effort="low",
+        ),
+    )
 
-# base_client = OpenAIChatCompletionClient(
+deterministic_client = OpenAIChatCompletionClient(
+        model="gemini-2.5-flash",
+        model_info=ModelInfo(
+            vision=False,
+            function_calling=True,
+            json_output=False,
+            structured_output=False,
+            family="gemini-2.5-flash",
+            reasoning_effort="low",
+        ),
+    )
+
+
+# base_client = token_wrap(OpenAIChatCompletionClient(
 #     model="gpt-4.1",
 # )
-# deterministic_client = OpenAIChatCompletionClient(
+# deterministic_client = token_wrap(OpenAIChatCompletionClient(
 #     model="gpt-4.1",
 # )
 
@@ -97,9 +115,7 @@ organizing_team = RoundRobinGroupChat(
 )
 
 async def main():
-    status_tracker = setup_swift_logging()
-    periodic_logger = PeriodicStatusLogger(interval=120) 
-    periodic_logger.start(status_tracker)
+    readable_handler = setup_readable_logging()
     try:
         # Add files to memory
         await add_files_from_folder(memory, str(DOCUMENTS_DIR))
