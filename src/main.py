@@ -229,7 +229,7 @@ async def main():
 
         experts_to_provide_to_coordinator = []
         for expert in approved_experts:
-            experts_to_provide_to_coordinator.append(expert["name"])
+            experts_to_provide_to_coordinator.append(expert["name"].lower().replace(" ", "_").replace("-","_"))
 
         swift_coordinator = AssistantAgent(
             "swift_coordinator",
@@ -246,7 +246,7 @@ async def main():
             expert_agent = Expert(
                 name=expert["name"].lower().replace(" ", "_").replace("-","_"),
                 model_client=base_client,
-                system_message=f"{expert['system_prompt']}\n\nKeep responses focused and concise (2-3 paragraphs). Always relate back to the specific risk assessment question.",
+                system_message=f"{expert['system_prompt']}\n\nMake sure responses are thorough. Always relate back to the specific risk assessment question.",
                 vector_memory=memory,
                 lobe1_config={
                     'keywords': expert["keywords"],
@@ -258,7 +258,6 @@ async def main():
                 }
             )
             swift_agents.append(expert_agent)
-            print(f"Added {expert['name']} to team")
         
         # Create the team
         SwiftTeam = SelectorGroupChat(

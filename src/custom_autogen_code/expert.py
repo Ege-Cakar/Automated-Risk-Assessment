@@ -76,7 +76,6 @@ class Expert(BaseChatAgent):
         You: "Scenario 2: Consider if [different angle]..."
         Reasoning: "This has [assessment]. Continue..."
         You: "Final scenario: What about [third perspective]..."
-        Reasoning: "CONCLUDE: Based on our analysis..."
 
         IMPORTANT: 
         - You're talking to your internal reasoning counterpart, not external experts
