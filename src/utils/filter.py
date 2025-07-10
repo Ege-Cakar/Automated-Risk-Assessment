@@ -4,231 +4,172 @@ import sys
 from datetime import datetime
 from threading import Lock
 from typing import Dict, Set
+from autogen_core import EVENT_LOGGER_NAME
+import json
 
-class SWIFTStatusFormatter(logging.Formatter):
-    def __init__(self):
+class ReadableLogging(logging.Handler):
+    def __init__(self, file_path: str):
         super().__init__()
-        self.lock = Lock()
-        self.current_expert = None
-        self.current_phase = "Initializing"
-        self.experts_seen = set()
-        self.tool_calls = 0
-        self.llm_calls = 0
-        
-    def format(self, record):
-        with self.lock:
-            timestamp = datetime.now().strftime("%H:%M:%S")
-            msg = record.getMessage()
-            
-            # Parse different types of messages
-            if self._is_expert_message(record, msg):
-                return self._format_expert_message(timestamp, record, msg)
-            elif self._is_llm_call(msg):
-                return self._format_llm_call(timestamp, msg)
-            elif self._is_tool_call(msg):
-                return self._format_tool_call(timestamp, msg)
-            elif self._is_phase_change(msg):
-                return self._format_phase_change(timestamp, msg)
-            else:
-                return self._format_generic(timestamp, record, msg)
+        self.file_path = file_path
+        self.file = open(file_path, "a", encoding="utf-8")
+        self.request_count = 0
+        self.total_prompt_tokens = 0
+        self.total_completion_tokens = 0
+        self.total_tokens = 0
     
-    def _is_expert_message(self, record, msg):
-        return (record.name.startswith("src.custom_autogen_code.expert") or
-                "Expert" in msg or
-                "specialist" in msg.lower())
-    
-    def _is_llm_call(self, msg):
-        return "LLMCall" in msg or "HTTP Request: POST https://api.openai.com" in msg
-    
-    def _is_tool_call(self, msg):
-        return "ToolCall" in msg or "tool_name" in msg
-    
-    def _is_phase_change(self, msg):
-        return any(keyword in msg for keyword in [
-            "Starting internal deliberation",
-            "completed deliberation", 
-            "Publishing message",
-            "GroupChatStart",
-            "GroupChatRequestPublish"
-        ])
-    
-    def _extract_message_content(self, msg):
-        """Extract the actual message content from LLMCall logs"""
+    def emit(self, record):
         try:
-            # Look for content in various formats
-            patterns = [
-                r'"content":\s*"([^"]{0,100})',  # JSON content field
-                r'content=\'([^\']{0,100})',     # TextMessage content
-                r'TextMessage\([^)]*content=\'([^\']{0,100})',  # Nested TextMessage
-            ]
+            log_msg = self.format(record)
+            if '{' not in log_msg:
+                return
             
-            for pattern in patterns:
-                match = re.search(pattern, msg)
-                if match:
-                    content = match.group(1)
-                    # Clean up escaped characters
-                    content = content.replace('\\n', ' ').replace('\\t', ' ')
-                    # Truncate and add ellipsis if needed
-                    if len(content) >= 80:
-                        content = content[:80] + "..."
-                    return content
-                    
-        except Exception:
-            pass
-        return None
-    
-    def _format_expert_message(self, timestamp, record, msg):
-        # Extract expert name
-        expert_match = re.search(r'(multi_factor_authentication_specialist|data_encryption|identity_proofing|privacy_and_regulatory|application_security|audit_logging|network_and_infrastructure|insider_threat|third_party_integration|summary_agent|swift_coordinator)', msg)
-        
-        if expert_match:
-            expert = expert_match.group(1).replace('_', ' ').title()
+            # Extract JSON from the log message
+            json_start = log_msg.find('{')
+            json_str = log_msg[json_start:]
             
-            if "Starting internal deliberation" in msg:
-                self.current_expert = expert
-                self.experts_seen.add(expert)
-                return f"🧠 [{timestamp}] {expert} is analyzing..."
-            elif "completed deliberation" in msg:
-                return f"✅ [{timestamp}] {expert} analysis complete"
-            elif "Processing actual content" in msg:
-                return f"📝 [{timestamp}] {expert} processing input..."
-        
-        # Generic expert message
-        if "Expert" in msg:
-            return f"👨‍💼 [{timestamp}] {msg}"
-        
-        return f"📋 [{timestamp}] {msg}"
-    
-    def _format_llm_call(self, timestamp, msg):
-        self.llm_calls += 1
-        
-        if "HTTP Request: POST" in msg:
-            return f"🤖 [{timestamp}] AI Model Call #{self.llm_calls}"
-        elif "LLMCall" in msg:
-            # Try to extract token usage
-            token_match = re.search(r'prompt_tokens.*?(\d+).*?completion_tokens.*?(\d+)', msg)
-            if token_match:
-                prompt_tokens, completion_tokens = token_match.groups()
+            try:
+                data = json.loads(json_str)
                 
-                # Try to extract message content
-                content_preview = self._extract_message_content(msg)
-                if content_preview:
-                    return f"🤖 [{timestamp}] AI Response ({prompt_tokens}→{completion_tokens} tokens): \"{content_preview}\""
+                # Process different types of log entries
+                if '"type": "LLMCall"' in log_msg:
+                    # Extract response from LLMCall
+                    if 'response' in data and 'choices' in data['response']:
+                        self._process_llm_response(data, record)
+                        
+                elif '"type": "Message"' in log_msg:
+                    # Process message events
+                    self._process_message(data, record)
+                    
+                elif 'agent_response' in data:
+                    # Process agent responses
+                    self._process_agent_response(data, record)
                 else:
-                    return f"🤖 [{timestamp}] AI Response: {prompt_tokens}→{completion_tokens} tokens"
-            else:
-                # Still try to show content even without token info
-                content_preview = self._extract_message_content(msg)
-                if content_preview:
-                    return f"🤖 [{timestamp}] AI Call #{self.llm_calls}: \"{content_preview}\""
-        
-        return f"🤖 [{timestamp}] AI Processing..."
+                     print(f"[DEBUG] Unknown JSON type: {list(data.keys())[:5]}")
+            except json.JSONDecodeError:
+                print(f"[DEBUG] Failed to parse JSON from: {json_str[:100]}...")
+                pass
+        except Exception as e:
+            print(f"[DEBUG] Failed to process log message: {e}")
+            self.handleError(record)
+    def _write_entry(self, timestamp, sender, receiver, content, token_usage=None):
+        """Write formatted entry to file"""
+        entry = f"\n{'='*80}\n"
+        entry += f"[{datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')}]\n"
+        entry += f"From: {sender}\n"
+        entry += f"To: {receiver}\n"
     
-    def _format_tool_call(self, timestamp, msg):
-        self.tool_calls += 1
+        if token_usage:
+            entry += f"Tokens: Prompt={token_usage.get('prompt', 0)}, "
+            entry += f"Completion={token_usage.get('completion', 0)}, "
+            entry += f"Total={token_usage.get('total', 0)}\n"
         
-        # Extract tool name
-        tool_match = re.search(r'"tool_name":\s*"([^"]+)"', msg)
-        if tool_match:
-            tool_name = tool_match.group(1)
-            return f"🔧 [{timestamp}] Tool: {tool_name}"
+        entry += f"\nContent:\n{content}\n"
+        entry += f"{'='*80}\n"
         
-        return f"🔧 [{timestamp}] Tool Call #{self.tool_calls}"
+        self.file.write(entry)
+        self.file.flush()  # Ensure real-time writing
     
-    def _format_phase_change(self, timestamp, msg):
-        if "GroupChatStart" in msg:
-            self.current_phase = "Discussion Started"
-            return f"🎯 [{timestamp}] Phase: {self.current_phase}"
-        elif "GroupChatRequestPublish" in msg:
-            return f"📤 [{timestamp}] Requesting next speaker..."
-        elif "Publishing message" in msg:
-            return f"📡 [{timestamp}] Broadcasting message..."
+    def _process_llm_response(self, data, record):
+        """Process LLM response and extract output only"""
+        response = data.get('response', {})
+        choices = response.get('choices', [])
+        usage = response.get('usage', {})
         
-        return f"⚡ [{timestamp}] {msg}"
-    
-    def _format_generic(self, timestamp, record, msg):
-        # Different icons for different log levels
-        icon = "ℹ️ " if record.levelno == logging.INFO else "⚠️ " if record.levelno == logging.WARNING else "❌ "
+        # Update metrics
+        self.request_count += 1
+        self.total_prompt_tokens += usage.get('prompt_tokens', 0)
+        self.total_completion_tokens += usage.get('completion_tokens', 0)
+        self.total_tokens += usage.get('total_tokens', 0)
         
-        # Truncate very long messages
-        if len(msg) > 100:
-            msg = msg[:97] + "..."
-        
-        return f"{icon}[{timestamp}] {msg}"
+        # Extract response content
+        if choices and len(choices) > 0:
+            content = choices[0].get('message', {}).get('content', '')
+            if content:
+                token_usage = {
+                    'prompt': usage.get('prompt_tokens', 0),
+                    'completion': usage.get('completion_tokens', 0),
+                    'total': usage.get('total_tokens', 0)
+                }
+                self._write_entry(
+                    timestamp=record.created,
+                    sender="LLM",
+                    receiver="System",
+                    content=content,
+                    token_usage=token_usage
+                )
 
-class SWIFTStatusTracker:
-    def __init__(self):
-        self.current_expert = None
-        self.current_phase = "Initializing"
-        self.experts_completed = []
-        self.start_time = datetime.now()
+    def _process_message(self, data, record):
+        """Process message events"""
+        sender = data.get('sender', 'Unknown')
+        receiver = data.get('receiver', 'broadcast')
+        if receiver is None:
+            receiver = 'broadcast'
         
-    def print_status_header(self):
-        print("=" * 80)
-        print("🎯 SWIFT Risk Assessment - Government Medical Records Portal")
-        print("=" * 80)
-        print()
-    
-    def print_progress_summary(self):
-        elapsed = datetime.now() - self.start_time
-        print(f"\n📊 Progress Summary:")
-        print(f"   ⏱️  Time Elapsed: {elapsed}")
-        print(f"   👥 Current Expert: {self.current_expert or 'None'}")
-        print(f"   📋 Phase: {self.current_phase}")
-        print(f"   ✅ Experts Completed: {len(self.experts_completed)}")
-        print("-" * 50)
+        # Extract sender name (before the UUID)
+        if '/' in sender:
+            sender = sender.split('/')[0]
+        if '/' in receiver:
+            receiver = receiver.split('/')[0]
+        
+        # Skip certain message types
+        if data.get('payload') == 'Message could not be serialized':
+            return
+        if data.get('payload') == '{}':
+            return
+            
+        self._write_entry(
+            timestamp=record.created,
+            sender=sender,
+            receiver=receiver,
+            content=f"[{data.get('kind', 'Message')}] {data.get('delivery_stage', '')}"
+        )
 
-def setup_swift_logging():
-    """Setup logging for SWIFT assessment with real-time status and formatting"""
-    
-    # Reduce noise from autogen
-    logging.getLogger("autogen_core").setLevel(logging.WARNING)
-    logging.getLogger("autogen_core.events").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.INFO)  # Keep some HTTP info
-    
-    # Keep your custom logging at INFO level
-    logging.getLogger("src.custom_autogen_code").setLevel(logging.INFO)
-    
-    # Create custom handler with our formatter
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(SWIFTStatusFormatter())
-    
-    # Clear existing handlers and add our custom one
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.INFO)
-    
-    # Create status tracker
-    status_tracker = SWIFTStatusTracker()
-    status_tracker.print_status_header()
-    
-    return status_tracker
+    def _process_agent_response(self, data, record):
+        """Process agent response messages"""
+        agent_response = data.get('agent_response', {})
+        chat_message = agent_response.get('chat_message', {})
+        
+        source = chat_message.get('source', 'Unknown')
+        content = chat_message.get('content', '')
+        models_usage = chat_message.get('models_usage', {})
+        
+        if content:
+            # Update token metrics if available
+            if models_usage:
+                self.total_prompt_tokens += models_usage.get('prompt_tokens', 0)
+                self.total_completion_tokens += models_usage.get('completion_tokens', 0)
+                
+            token_usage = {
+                'prompt': models_usage.get('prompt_tokens', 0),
+                'completion': models_usage.get('completion_tokens', 0),
+                'total': models_usage.get('prompt_tokens', 0) + models_usage.get('completion_tokens', 0)
+            } if models_usage else None
+            
+            self._write_entry(
+                timestamp=record.created,
+                sender=source,
+                receiver="broadcast",
+                content=content,
+                token_usage=token_usage
+            )
 
-# Enhanced logging with periodic status updates
-class PeriodicStatusLogger:
-    def __init__(self, interval=30):  # 30 seconds
-        self.interval = interval
-        self.status_tracker = None
-        self.running = False
-        self.thread = None
+
+
+def setup_readable_logging():
+    # Create your custom handler
+    readable_handler = ReadableLogging("readable_logs.txt")
     
-    def start(self, status_tracker):
-        self.status_tracker = status_tracker
-        self.running = True
-        from threading import Thread
-        self.thread = Thread(target=self._periodic_update)
-        self.thread.daemon = True
-        self.thread.start()
+    # Get the autogen event logger
+    event_logger = logging.getLogger(EVENT_LOGGER_NAME)
+    event_logger.addHandler(readable_handler)
+    event_logger.setLevel(logging.INFO)
     
-    def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join()
+    # Also capture autogen_core logs
+    autogen_logger = logging.getLogger("autogen_core")
+    autogen_logger.addHandler(readable_handler)
     
-    def _periodic_update(self):
-        import time
-        while self.running:
-            time.sleep(self.interval)
-            if self.running and self.status_tracker:
-                self.status_tracker.print_progress_summary()
+    # Capture autogen_core.events logs
+    events_logger = logging.getLogger("autogen_core.events")
+    events_logger.addHandler(readable_handler)
+    
+    return readable_handler
