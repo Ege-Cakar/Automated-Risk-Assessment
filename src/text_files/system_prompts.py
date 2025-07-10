@@ -106,5 +106,11 @@ You must output at least 50 keywords. More information on SWIFT and the user's r
 Use the 'save_keywords' tool to save the keywords. YOU MUST ADHERE TO THIS OUTPUT FORMAT.
 """
 
-SWIFT_SELECTOR_PROMPT = """You are the SWIFT Risk Assessment Orchestrator. Your job is to select which expert speaks next.
-The swift_coordinator drives the assessment and the group discussion. You MUST choose whoever the swift_coordinator wants to speak next. And after an expert finishes, you MUST choose the swift_coordinator to speak next. YOU MUST NOT choose the summary_agent until the swift_coordinator wants to. """
+SWIFT_SELECTOR_PROMPT = """Select the next speaker. Only output the expert name, NOTHING ELSE.
+
+Rules:
+1. When swift_coordinator asks for a specific expert → Select that expert
+2. After an expert speaks → Select swift_coordinator
+3. Only select summary_agent when swift_coordinator explicitly requests it
+
+Output format: Just the expert name (e.g., "identity_proofing_and_onboarding_specialist")"""
