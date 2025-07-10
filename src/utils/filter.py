@@ -16,6 +16,8 @@ class ReadableLogging(logging.Handler):
         self.total_prompt_tokens = 0
         self.total_completion_tokens = 0
         self.total_tokens = 0
+        self.recent_messages = []
+        self.cache_size = 50
     
     def emit(self, record):
         try:
@@ -53,6 +55,9 @@ class ReadableLogging(logging.Handler):
             self.handleError(record)
     def _write_entry(self, timestamp, sender, receiver, content, token_usage=None):
         """Write formatted entry to file"""
+        if self._is_duplicate(content, sender, receiver):
+            return
+
         entry = f"\n{'='*80}\n"
         entry += f"[{datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')}]\n"
         entry += f"From: {sender}\n"
@@ -81,6 +86,13 @@ class ReadableLogging(logging.Handler):
         self.total_completion_tokens += usage.get('completion_tokens', 0)
         self.total_tokens += usage.get('total_tokens', 0)
         
+        agent_id = data.get('agent_id', 'Unknown')
+        # Extract the agent name (before the UUID)
+        if '/' in agent_id:
+            agent_name = agent_id.split('/')[0]
+        else:
+            agent_name = agent_id
+
         # Extract response content
         if choices and len(choices) > 0:
             content = choices[0].get('message', {}).get('content', '')
@@ -92,37 +104,68 @@ class ReadableLogging(logging.Handler):
                 }
                 self._write_entry(
                     timestamp=record.created,
-                    sender="LLM",
+                    sender=agent_name,
                     receiver="System",
                     content=content,
                     token_usage=token_usage
                 )
 
     def _process_message(self, data, record):
-        """Process message events"""
+        """Process message events - only log meaningful content"""
+        # Skip delivery stage messages and empty payloads
+        delivery_stage = data.get('delivery_stage', '')
+        if 'DeliveryStage' in delivery_stage:
+            return
+        
+        # Skip empty or unhelpful payloads
+        payload = data.get('payload', '')
+        if payload in ['{}', 'Message could not be serialized', '']:
+            return
+        
+        # Only process if there's actual content
         sender = data.get('sender', 'Unknown')
         receiver = data.get('receiver', 'broadcast')
         if receiver is None:
             receiver = 'broadcast'
         
-        # Extract sender name (before the UUID)
+        # Extract sender/receiver names (before the UUID)
         if '/' in sender:
             sender = sender.split('/')[0]
         if '/' in receiver:
             receiver = receiver.split('/')[0]
         
-        # Skip certain message types
-        if data.get('payload') == 'Message could not be serialized':
-            return
-        if data.get('payload') == '{}':
-            return
-            
-        self._write_entry(
-            timestamp=record.created,
-            sender=sender,
-            receiver=receiver,
-            content=f"[{data.get('kind', 'Message')}] {data.get('delivery_stage', '')}"
-        )
+        # Try to extract actual message content from payload
+        try:
+            if isinstance(payload, str) and payload.startswith('{'):
+                payload_data = json.loads(payload)
+                # Look for actual message content
+                if 'message' in payload_data:
+                    msg = payload_data['message']
+                    if isinstance(msg, dict) and 'content' in msg:
+                        content = msg['content']
+                        source = msg.get('source', sender)
+                        self._write_entry(
+                            timestamp=record.created,
+                            sender=source,
+                            receiver=receiver,
+                            content=content
+                        )
+                        return
+        except:
+            pass
+
+    def _is_duplicate(self, content, sender, receiver):
+        """Check if this message was recently processed"""
+        msg_hash = f"{sender}:{receiver}:{content[:100]}"  # Use first 100 chars
+        if msg_hash in self.recent_messages:
+            return True
+        
+        # Add to cache and maintain size
+        self.recent_messages.append(msg_hash)
+        if len(self.recent_messages) > self.cache_size:
+            self.recent_messages.pop(0)
+        
+        return False
 
     def _process_agent_response(self, data, record):
         """Process agent response messages"""
