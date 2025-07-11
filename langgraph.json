@@ -1,0 +1,7 @@
+{
+    "dependencies": ["."],
+    "graphs": {
+      "SWIFT_team": "./src/custom_code/ra_team.py:team_graph"
+    },
+    "env": ".env"
+  }

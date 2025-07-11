@@ -1,0 +1,23 @@
+# Core dependencies
+langgraph>=0.0.15
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-chroma>=0.0.1
+langchain-core>=0.1.0
+
+# Vector database
+chromadb>=0.4.22
+
+# Environment and utilities
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+typing-extensions>=4.8.0
+
+# Async support
+asyncio>=3.4.3
+
+# Logging and monitoring
+logging>=0.5.1.2
+
+# Optional visualization dependencies
+mermaid-cli>=0.1.1  # For graph visualization

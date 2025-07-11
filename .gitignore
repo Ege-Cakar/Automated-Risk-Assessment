@@ -1,9 +1,0 @@
-.venv
-.env
-src/text_files/approved_experts.json
-database
-src/database_query_example.py
-src/utils/db_summarizer.py
-.DS_Store
-description.md
-readable_logs.txt
