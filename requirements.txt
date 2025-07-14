@@ -17,7 +17,7 @@ typing-extensions>=4.8.0
 asyncio>=3.4.3
 
 # Logging and monitoring
-logging>=0.5.1.2
+logging
 
 # Optional visualization dependencies
 mermaid-cli>=0.1.1  # For graph visualization

@@ -1,4 +1,6 @@
-from typing import List, TypedDict, Dict
+from typing import List, TypedDict, Dict, Annotated
+from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 class ExpertState(TypedDict):
     """State for the Expert agent's internal deliberation"""
@@ -24,4 +26,10 @@ class TeamState(TypedDict):
     concluded: bool                             # Whether conversation is done
     coordinator_decision: str                   # "expert_name", "summarize", "end"
     final_report: str                          # Summary agent's final output
-    debug: bool                                # Debug mode flag
+    debug: bool                                # Debug mode 
+    
+class ExpertGenTeamState(TypedDict):
+    messages: Annotated[List[BaseMessage], add_messages]
+    current_agent: str
+    expert_count: int
+    task_description: str

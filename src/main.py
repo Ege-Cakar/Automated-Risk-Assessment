@@ -1,5 +1,4 @@
-from typing import List, Dict, Any, Optional, Annotated
-from typing_extensions import TypedDict
+from typing import List, Dict, Any, Optional, Annotated  
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -9,10 +8,12 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 from src.custom_code.expert import Expert
-from src.custom_code.lobe import LobeVectorMemory
+from src.custom_code.lobe import LobeVectorMemory   
 from src.custom_code.coordinator import Coordinator
 from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.ra_team import ExpertTeam
+from src.custom_code.expert_generator import ExpertGenerator
+
 
 load_dotenv()
 
@@ -31,6 +32,11 @@ async def main():
         risk_assessment_request = file.read()
         logger.info("Risk assessment request file loaded successfully")
 
+    # Read the risk assessment request file
+    with open("data/text_files/swift_info.txt", "r", encoding="utf-8") as file:
+        swift_info = file.read()
+        logger.info("Swift info file loaded successfully")
+
     # Setup vector memory using current API
     vector_memory = LobeVectorMemory(persist_directory="./data/vectordb")
     
@@ -39,36 +45,64 @@ async def main():
         model="gpt-4.1",
         temperature=0.7
     )
-    
-    security_expert = Expert(
-        name="SecurityExpert",
-        model_client=model_client,
-        vector_memory=vector_memory,
-        system_message="You are a cybersecurity expert specializing in threat analysis.",
-        debug=False  # Let team handle debug output
+
+    thinking_client = ChatOpenAI(
+        model="o4-mini",
+        temperature=0.7
     )
     
-    compliance_expert = Expert(
-        name="ComplianceExpert", 
-        model_client=model_client,
-        vector_memory=vector_memory,
-        system_message="You are a compliance expert specializing in regulatory requirements.",
-        debug=False
-    )
+    if generate_from_scratch:
+        with open("data/text_files/approved_experts.json", "w") as f:
+            f.write("[]")
+        
+        # Create the task request string
+        expert_gen_task = f"""Generate a team of experts for risk assessment based on the following:
+
+        User Request: {risk_assessment_request}
+
+        Information on SWIFT steps: {swift_info}
+
+        You will have access to relevant data to help with keyword generation and expert identification. 
+        """
+
+        expert_generator = ExpertGenerator(
+            model="o4-mini",
+            provider="openai",
+            min_experts=5,
+            max_experts=12
+        )
+
+        _ = expert_generator.run_expert_generator(
+            user_request=risk_assessment_request,
+            swift_details=swift_info, 
+            database_info=database_info
+        )
     
-    architecture_expert = Expert(
-        name="ArchitectureExpert",
-        model_client=model_client, 
-        vector_memory=vector_memory,
-        system_message="You are a cloud architecture expert specializing in scalable systems.",
-        debug=False
-    )
-    
-    experts = {
-        "SecurityExpert": security_expert,
-        "ComplianceExpert": compliance_expert,
-        "ArchitectureExpert": architecture_expert
-    }
+    with open("data/text_files/approved_experts.json", "r") as f:
+        approved_experts = json.load(f)
+
+    # Create experts
+    experts = {}
+    for expert in approved_experts:
+        keywords = expert["keywords"]
+        lobe1_config = {
+            "keywords": keywords,
+            "temperature": 0.8
+        }
+        lobe2_config = {
+            "keywords": keywords,
+            "temperature": 0.4
+        }
+        expert_agent = Expert(
+            name=expert["name"].lower().replace(" ", "_").replace("-","_"),
+            model_client=model_client,
+            vector_memory=vector_memory,
+            system_message=expert["system_prompt"],
+            lobe1_config=lobe1_config,
+            lobe2_config=lobe2_config,
+            debug=False  # Let team handle debug output
+        )
+        experts[expert["name"]] = expert_agent
     
     # Create team components
     coordinator = Coordinator(model_client, experts, debug=True)
@@ -88,7 +122,7 @@ async def main():
         print("\n" + "="*80)
     
     # Process a query
-    query = risk_assessment_request
+    query = swift_info
     response = await team.consult(query)
     
     if DEBUG_INTERNAL_DELIBERATION:
