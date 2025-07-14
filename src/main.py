@@ -51,6 +51,8 @@ async def main():
         temperature=0.7
     )
     
+
+    
     if generate_from_scratch:
         with open("data/text_files/approved_experts.json", "w") as f:
             f.write("[]")
@@ -116,6 +118,11 @@ async def main():
         max_messages=15,
         debug=True
     )
+    
+    png = team.team_graph.get_graph().draw_mermaid_png()
+    
+    with open("team_graph.png", "wb") as f:
+        f.write(png)
     
     if DEBUG_INTERNAL_DELIBERATION:
         print("✅ Expert system initialized!")

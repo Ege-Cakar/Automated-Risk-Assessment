@@ -125,6 +125,8 @@ class ExpertGenerator:
         self.organizer_tools = ToolNode(organizer_tools_list)
         self.critic_tools = ToolNode(critic_tools_list)
 
+        self.team_graph = self.create_graph()
+
     def organizer_agent(self, state: ExpertGenTeamState) -> dict:
         """The Organizer agent creates expert specifications"""
         print("🔨 Organizer Agent Working...")
@@ -503,9 +505,13 @@ if __name__ == "__main__":
         provider="openai",
         min_experts=5
     )
+
+    png = expert_generator.team_graph.get_graph().draw_mermaid_png()
+    with open("expert_gen_graph.png", "wb") as f:
+        f.write(png)
     
-    with open("data/text_files/approved_experts.json", "w") as f:
-        f.write("[]")
+    # with open("data/text_files/approved_experts.json", "w") as f:
+    #     f.write("[]")
     
     with open("data/text_files/dummy_req.txt", "r", encoding="utf-8") as file:
         risk_assessment_request = file.read()
@@ -522,10 +528,10 @@ if __name__ == "__main__":
     database_info = "The database contains information about a wide range of relevant expertise."
     
     # Run the assessment
-    experts = expert_generator.run_expert_generator(
-        user_request=dummy_req,
-        swift_details=swift_info, 
-        database_info=database_info
-    )
+    # experts = expert_generator.run_expert_generator(
+    #     user_request=dummy_req,
+    #     swift_details=swift_info, 
+    #     database_info=database_info
+    # )
     
     print(f"\n📁 Expert team saved to: src/text_files/approved_experts.json")

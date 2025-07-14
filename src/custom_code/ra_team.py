@@ -257,7 +257,7 @@ async def demo_team_consultation():
     )
 
     png = team.team_graph.get_graph().draw_mermaid_png()
-    with open("graph.png", "wb") as f:
+    with open("swift_team_graph.png", "wb") as f:
         f.write(png)
     
     # Run consultation
