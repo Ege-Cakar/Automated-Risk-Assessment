@@ -22,11 +22,20 @@ logger = logging.getLogger(__name__)
 # Debug flag - Set to True to see internal deliberation, False for quiet mode
 DEBUG_INTERNAL_DELIBERATION = False
 
+generate_from_scratch = False
+
 # Usage example with current APIs
 async def main():
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
+    whiteboard = "data/text_files/whiteboard.md"
+    
+    # Clear whiteboard
+    with open(whiteboard, "w") as f:
+        f.write("")
+
+
     # Read the risk assessment request file
     with open("data/text_files/dummy_req.txt", "r", encoding="utf-8") as file:
         risk_assessment_request = file.read()
@@ -115,7 +124,7 @@ async def main():
         coordinator=coordinator,
         experts=experts,
         summary_agent=summary_agent,
-        max_messages=15,
+        max_messages=30,
         debug=True
     )
     

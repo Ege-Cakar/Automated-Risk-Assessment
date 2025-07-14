@@ -12,3 +12,5 @@ __pycache__/
 cmb
 data/database/
 data/vectordb/
+
+planning.md

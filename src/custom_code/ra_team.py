@@ -30,6 +30,7 @@ class ExpertTeam:
         experts: Dict[str, Any],  # Expert instances
         summary_agent: SummaryAgent,
         max_messages: int = 20,
+        recursion_limit: int = 75,
         debug: bool = False
     ):
         self.coordinator = coordinator
@@ -37,42 +38,44 @@ class ExpertTeam:
         self.summary_agent = summary_agent
         self.max_messages = max_messages
         self.debug = debug
-        
+        self.recursion_limit = recursion_limit
+
         # Build the team graph
         self.team_graph = self._build_team_graph()
     
     def _build_team_graph(self) -> StateGraph:
         """Build the LangGraph state machine for team coordination"""
-        
+
         workflow = StateGraph(TeamState)
-        
-        # Add nodes
+
+        # Add core nodes
         workflow.add_node("coordinator_decide", self._coordinator_decide)
-        workflow.add_node("expert_deliberate", self._expert_deliberate) 
         workflow.add_node("generate_summary", self._generate_summary)
         workflow.add_node("finalize", self._finalize)
-        
-        # Set entry point
+
+        # One node per expert
+        for expert_name in self.experts:
+            workflow.add_node(expert_name, self._expert_deliberate)
+            # Each expert returns to coordinator after speaking
+            workflow.add_edge(expert_name, "coordinator_decide")
+
+        # Entry point
         workflow.add_edge(START, "coordinator_decide")
-        
-        # Define conditional edges from coordinator
+
+        # Build routing map dynamically: each expert name maps to itself
+        route_map = {name: name for name in self.experts}
+        route_map["summarize"] = "generate_summary"
+
         workflow.add_conditional_edges(
             "coordinator_decide",
             self._route_after_coordinator,
-            {
-                "expert": "expert_deliberate",
-                "summarize": "generate_summary", 
-                "end": "finalize"
-            }
+            route_map,
         )
-        
-        # Expert always returns to coordinator
-        workflow.add_edge("expert_deliberate", "coordinator_decide")
-        
-        # Summary goes to finalize
+
+        # Summary → finalize → END
         workflow.add_edge("generate_summary", "finalize")
         workflow.add_edge("finalize", END)
-        
+    
         return workflow.compile()
     
     async def _coordinator_decide(self, state: TeamState) -> TeamState:
@@ -142,25 +145,22 @@ class ExpertTeam:
         return {**state, "concluded": True}
     
     def _route_after_coordinator(self, state: TeamState) -> str:
-        """Route based on coordinator's decision"""
+        """Return the next node key based on coordinator decision"""
         decision = state["coordinator_decision"]
-        
         if decision == "summarize":
             return "summarize"
         elif decision == "end":
-            return "end"
-        elif decision in self.experts:
-            return "expert"
+            return "finalize"  # triggers END via finalize node
         else:
-            # Fallback to first available expert
-            return "expert"
+            # coordinator returns the expert name directly; fallback to first expert
+            return decision if decision in self.experts else next(iter(self.experts))
     
     async def consult(self, query: str) -> str:
         """Main method to run team consultation"""
         
         if self.debug:
             print(f"\n{'='*80}")
-            print(f"🚀 EXPERT TEAM CONSULTATION STARTING")
+            print(f"🖋️ SWIFT RISK ASSESSMENT STARTING")
             print(f"{'='*80}")
             print(f"📋 Query: {query}")
             print(f"👥 Available Experts: {list(self.experts.keys())}")
@@ -183,7 +183,7 @@ class ExpertTeam:
         
         try:
             # Run the team consultation
-            final_state = await self.team_graph.ainvoke(initial_state)
+            final_state = await self.team_graph.ainvoke(initial_state, {"recursion_limit": self.recursion_limit})
             
             # Return final report or last expert response
             result = final_state.get("final_report", "No summary generated")
@@ -201,71 +201,3 @@ class ExpertTeam:
             if self.debug:
                 print(f"\n❌ {error_msg}")
             return error_msg
-
-async def demo_team_consultation():
-    """Demo the team structure"""
-    
-    from src.custom_code.expert import Expert  # Your existing Expert class
-    from src.utils.memory import LobeVectorMemory  # Your existing memory class
-    
-    # Setup
-    model_client = ChatOpenAI(model="gpt-4", temperature=0.7)
-    vector_memory = LobeVectorMemory(persist_directory="./data/database")
-    
-    # Create experts
-    security_expert = Expert(
-        name="SecurityExpert",
-        model_client=model_client,
-        vector_memory=vector_memory,
-        system_message="You are a cybersecurity expert specializing in threat analysis.",
-        debug=False  # Let team handle debug output
-    )
-    
-    compliance_expert = Expert(
-        name="ComplianceExpert", 
-        model_client=model_client,
-        vector_memory=vector_memory,
-        system_message="You are a compliance expert specializing in regulatory requirements.",
-        debug=False
-    )
-    
-    architecture_expert = Expert(
-        name="ArchitectureExpert",
-        model_client=model_client, 
-        vector_memory=vector_memory,
-        system_message="You are a cloud architecture expert specializing in scalable systems.",
-        debug=False
-    )
-    
-    experts = {
-        "SecurityExpert": security_expert,
-        "ComplianceExpert": compliance_expert,
-        "ArchitectureExpert": architecture_expert
-    }
-    
-    # Create team components
-    coordinator = Coordinator(model_client, experts, debug=True)
-    summary_agent = SummaryAgent(model_client, debug=True)
-    
-    # Create team
-    team = ExpertTeam(
-        coordinator=coordinator,
-        experts=experts,
-        summary_agent=summary_agent,
-        max_messages=15,
-        debug=True
-    )
-
-    png = team.team_graph.get_graph().draw_mermaid_png()
-    with open("swift_team_graph.png", "wb") as f:
-        f.write(png)
-    
-    # Run consultation
-    query = "Our company wants to migrate to a multi-cloud architecture. What are the key considerations for security, compliance, and technical implementation?"
-    
-    result = await team.consult(query)
-    print(result)
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(demo_team_consultation())
