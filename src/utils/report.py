@@ -1,15 +1,15 @@
 from langchain_core.tools import tool
 from typing import Annotated, Optional
-from src.utils.document_manager import RiskDocumentManager, SectionStatus
+from src.utils.document_manager import DocumentManager, SectionStatus
 import json
 
 # Global document manager instance
 _doc_manager = None
 
-def get_doc_manager() -> RiskDocumentManager:
+def get_doc_manager() -> DocumentManager:
     global _doc_manager
     if _doc_manager is None:
-        _doc_manager = RiskDocumentManager()
+        _doc_manager = DocumentManager()
     return _doc_manager
 
 @tool

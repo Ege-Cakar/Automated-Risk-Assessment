@@ -3,7 +3,6 @@ from typing import List, Any
 from src.utils.memory import LobeVectorMemory
 import json
 import logging
-from src.utils.report import write_to_report, read_report
 
 logger = logging.getLogger(__name__) # Do I need this?
 
@@ -46,12 +45,20 @@ class Lobe:
             context = f"Initial keywords: {', '.join(self.keywords)}"
         else:
             context_parts = [f"Relevant context for keywords [{', '.join(self.keywords)}]:"]
-            for i, result in enumerate(results[:3], 1):
-                context_parts.append(f"{i}. {result['results'][0]['content']}")
+            
+            # Take top 6 results and enumerate starting from 1
+            for i, result in enumerate(results[:6], 1):
+                context_parts.append(f"{i}. {result['content']}")
+                
+                # Optionally include relevance score
+                if 'score' in result:
+                    context_parts[-1] += f" (relevance: {result['score']:.2f})"
+            
             context = "\n".join(context_parts)
         
         self._system_message = f"{self._base_system_message}\n\n{context}"
         self._initialized = True
+
     
     async def query_common_db(self, keywords: List[str], top_k: int = 5) -> str:
         """Query the vector database using current API"""
@@ -66,9 +73,9 @@ class Lobe:
             formatted_results = []
             for result in results:
                 formatted_results.append({
-                    "content": result["results"][0]["content"],
-                    "score": result["results"][0]["metadata"].get('score', 0),
-                    "metadata": {k: v for k, v in result["results"][0]["metadata"].items() if k not in ['score', 'id']}
+                    "content": result["content"],
+                    "score": result["metadata"].get('score', 0),
+                    "metadata": {k: v for k, v in result["metadata"].items() if k not in ['score', 'id']}
                 })
             
             return json.dumps({

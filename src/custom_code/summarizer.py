@@ -2,7 +2,7 @@ from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 from src.utils.schemas import TeamState
 from src.utils.system_prompts import SUMMARIZER_PROMPT
-from src.utils.report import write_to_report, read_report
+from src.utils.report import read_current_document, create_section
 
 class SummaryAgent:
     """
@@ -10,7 +10,7 @@ class SummaryAgent:
     """
     
     def __init__(self, model_client: ChatOpenAI, debug: bool = False):
-        self.model_client = model_client
+        self.model_client = model_client.bind_functions([create_section, read_current_document])
         self.debug = debug
         
         self.system_message = SUMMARIZER_PROMPT
@@ -38,7 +38,7 @@ Expert Contributions:
 Full Conversation Log:
 {conversation_log}
 
-Create the comprehensive final report that synthesizes all expert input."""
+Create the comprehensive final section that synthesizes all expert input. To that end, be sure to read all existing sections with read_current_document. Create a new section called "Final Summary" and write the summary there using create_section."""
         
         messages = [
             {"role": "system", "content": self.system_message},

@@ -24,6 +24,21 @@ DEBUG_INTERNAL_DELIBERATION = False
 
 generate_from_scratch = False
 
+# In your main.py or setup script:
+async def initialize_database():
+    vector_memory = LobeVectorMemory(persist_directory="./data/vectordb")
+    
+    # Add files from a folder
+    stats = await vector_memory.add_folder(
+        folder_path="data/database",
+        file_extensions=['.txt', '.md', '.pdf']
+    )
+    
+    print(f"Database initialized: {stats['added']} files added, {stats['skipped']} skipped")
+
+    return vector_memory
+
+
 # Usage example with current APIs
 async def main():
     # Setup logging
@@ -42,12 +57,17 @@ async def main():
         logger.info("Risk assessment request file loaded successfully")
 
     # Read the risk assessment request file
-    with open("data/text_files/swift_info.txt", "r", encoding="utf-8") as file:
+    with open("data/text_files/swift_info.md", "r", encoding="utf-8") as file:
         swift_info = file.read()
         logger.info("Swift info file loaded successfully")
 
+    # Read the database info file
+    with open("data/text_files/database_info.txt", "r", encoding="utf-8") as file:
+        database_info = file.read()
+        logger.info("Database info file loaded successfully")
+
     # Setup vector memory using current API
-    vector_memory = LobeVectorMemory(persist_directory="./data/vectordb")
+    vector_memory = await initialize_database()
     
     # Create model client using current API
     model_client = ChatOpenAI(

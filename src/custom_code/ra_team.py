@@ -15,7 +15,6 @@ from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.coordinator import Coordinator
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
-from src.utils.report import write_to_report, read_report
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +39,6 @@ class ExpertTeam:
         self.max_messages = max_messages
         self.debug = debug
         self.recursion_limit = recursion_limit
-
-        self.report_tools = [write_to_report, read_report]
-        self.report_tool_node = ToolNode(self.report_tools)
 
         # Build the team graph
         self.team_graph = self._build_team_graph()

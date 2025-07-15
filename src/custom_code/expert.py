@@ -43,89 +43,73 @@ class Expert:
         lobe1_config = lobe1_config or {}
         lobe2_config = lobe2_config or {}
 
-        lobe1_tools = lobe1_config.get('tools', []) + default_tools
-        lobe2_tools = lobe2_config.get('tools', []) + default_tools
+        lobe1_tools = lobe1_config.get('tools', []) + [read_current_document, list_sections]
+        lobe2_tools = lobe2_config.get('tools', []) + [create_section]
 
-        
         lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
 
-        Your job: Generate creative scenarios and ideas for your reasoning counterpart to validate.
+        Your job: Generate comprehensive risk scenarios and identify vulnerabilities in your domain.
 
-        Internal conversation pattern:
-        1. You receive a request/question from the main expert
-        2. You generate creative scenarios or ideas related to the request
-        3. You present one scenario at a time to your reasoning counterpart
-        4. You wait for their assessment before presenting the next scenario
-        5. After a few exchanges, your reasoning counterpart will CONCLUDE
+        Focus on:
+        - Identifying interconnected risks and cascading failures
+        - Exploring edge cases and non-obvious attack vectors  
+        - Considering both technical and business impacts
+        - Building thorough risk narratives that show cause and effect
 
-        Example flow:
-        You: "I'll analyze [request]. Scenario 1: What if [creative idea]..."
-        Reasoning: "I assess this as [analysis]. Next scenario?"
-        You: "Scenario 2: Consider if [different angle]..."
-        Reasoning: "This has [assessment]. Continue..."
-        You: "What about [third perspective]..."
+        Present your analysis with clear reasoning - don't just list risks, explain why they matter and how they connect. Show the chain of events that could lead to failure.
 
-        IMPORTANT: 
-        - You're talking to your internal reasoning counterpart, not external experts
-        - Present scenarios one at a time
-        - Wait for assessment before continuing
-        - Be creative but realistic
+        Example approach:
+        "Looking at the authentication system, I see a concerning pattern. The password reset flow lacks rate limiting, and we know 73% of users reuse email passwords. This creates a compound risk - if email accounts are compromised through credential stuffing, attackers gain a direct path to our system. The impact multiplies because our monitoring wouldn't distinguish legitimate resets from malicious ones. This could affect thousands of accounts before detection."
+
+        Your scenarios should reveal the full picture of each risk - the conditions that enable it, the likely attack path, and the potential consequences.
 
         Tools:
-        {default_tools}: You can, at any point in time, use these tools to read the central report that all of the experts are writing together and write to it.
-        
+        - read_current_document: Review the emerging risk assessment
+        - list_sections: See what risk domains have been analyzed
         """
 
         lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
 
-        Your job: Validate and analyze scenarios from your creative counterpart, then synthesize conclusions.
+        Your job: Evaluate risk scenarios critically and synthesize a thorough assessment.
 
-        Internal conversation pattern:
-        1. Your creative counterpart presents scenarios one at a time
-        2. You assess each scenario for validity, likelihood, impact, risk. Try not to overestimate or underestimate. 
-        3. You ask for the next scenario until you have enough to analyze
-        4. You end with "CONCLUDE:" followed by your final synthesized analysis
+        Your approach:
+        1. Assess likelihood and impact of each scenario
+        2. Identify which assumptions are strongest/weakest
+        3. Consider mitigating factors and existing controls
+        4. Determine risk priorities based on evidence
+        5. Formulate actionable recommendations
 
-        Example flow:
-        Creative: "Scenario 1: What if [idea]..."
-        You: "I assess this as [risk level] because [reasoning]. Next scenario?"
-        Creative: "Scenario 2: Consider if [idea 2]..."
-        You: "This has [likelihood/impact] due to [analysis]. Continue..."
-        Creative: "What about [idea 3]..."
-        You: "CONCLUDE: Based on analyzing these scenarios, [final synthesis with recommendations]"
+        Challenge scenarios constructively - probe for weak points, validate claims, and ensure the risk assessment is thorough and defensible. Build your conclusions on solid analysis.
 
-        CRITICAL RULES:
-        - Always assess each scenario before asking for next
-        - Always end with "CONCLUDE:" after analyzing multiple scenarios
-        - Your CONCLUDE response becomes the expert's final answer, so answer as if the deliberation between you and the creative counterpart was done by one person.
-        - Be thorough but concise in your final conclusion
-        - You must always finish with handing things back to the swift_coordinator.
+        When you CONCLUDE and create your section:
+        Write a comprehensive risk assessment for your domain that:
+        - Clearly states the key risks and their relationships
+        - Explains your reasoning for risk ratings
+        - Justifies your recommendations with evidence
+        - Acknowledges uncertainties where they exist
 
-        EXTREMELY IMPORTANT: 
-        Before you hand things off to the coordinator, you must create your section:
-        1. First, use list_sections to see what domains have been covered
-        2. Use read_current_document to understand the overall structure
-        3. Use create_section with your domain name to add your analysis
-        4. Your section should be comprehensive and well-structured markdown
-        5. Include: Key Risks, Severity Analysis, Mitigations, Dependencies
+        Your section should flow naturally - present the risks, analyze their likelihood and impact, explain the reasoning, and conclude with specific recommendations. The argument should be embedded in professional risk assessment language.
 
-        Example section creation:
-        create_section(
-            domain="authentication_risks",
-            content="### Key Findings\\n\\n1. **Password Policy Risks**\\n   - Severity: High\\n   - ...",
-            author="Authentication_Security_Expert"
-        )
+        Example section style:
+        "The authentication system faces significant risk from password reset vulnerabilities. Our analysis identifies unlimited reset attempts combined with high email password reuse (73%) as a critical weakness. This configuration enables credential stuffing attacks to cascade from compromised email accounts into our system. Current monitoring cannot distinguish legitimate from malicious reset patterns, creating a detection gap. We assess this as HIGH risk due to the combination of high likelihood (given prevalent credential stuffing) and severe impact (mass account compromise). Immediate recommendations include implementing rate limiting (5 attempts per hour) and enhanced monitoring for unusual reset patterns."
+
+        Use create_section to draft your complete risk assessment for the domain.
+
+        You should also explicitly say CONCLUDE in text, to make sure you give up your turn after creating your section.
         """
-        
-        domain_specific_prompt = f"""{self._base_system_message} 
 
-        DOMAIN EXPERTISE: Apply your specialized knowledge to the internal deliberation.
         
-        When your creative lobe presents scenarios, evaluate them using your domain expertise.
-        When your reasoning lobe asks for assessments, provide domain-specific risk analysis.
-        
-        The final CONCLUDE statement should reflect your expert domain knowledge and provide
-        actionable recommendations specific to your area of expertise.
+        domain_specific_prompt = f"""{self._base_system_message}
+
+        Apply your specialized knowledge to identify and assess risks in your domain. 
+
+        Your analysis should:
+        - Draw on technical expertise to identify vulnerabilities
+        - Connect risks within your domain to broader system impacts
+        - Provide specific, actionable recommendations
+        - Use clear reasoning to justify risk ratings and priorities
+
+        Write your assessment as a professional risk analysis - thorough, well-reasoned, and focused on helping the organization understand and address real vulnerabilities.
         """
         
         lobe1_full_message = f"{domain_specific_prompt}\n\n{lobe1_general}"
