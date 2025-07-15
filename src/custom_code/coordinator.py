@@ -19,13 +19,15 @@ class Coordinator:
         model_client: ChatOpenAI,
         experts: Dict[str, Any],  # Will be Expert instances
         debug: bool = False,
-        tools: List[Any] = None
+        tools: List[Any] = None,
+        swift_info: str = ""
     ):
         self.base_model_client = model_client
         self.experts = experts
         self.debug = debug
         self.tools = tools or [read_current_document, list_sections, merge_section]
         self.system_message = SWIFT_COORDINATOR_PROMPT
+        self.swift_info = swift_info
 
         # Bind tools to create a new model client
         self.model_client = model_client.bind_tools(self.tools)
@@ -78,7 +80,8 @@ Then decide what to do next. Your final response must be valid JSON only."""
         
         # Format system message with expert list
         formatted_system = self.system_message.format(
-            expert_list=", ".join(self.experts.keys())
+            expert_list=", ".join(self.experts.keys()),
+            swift_info=self.swift_info
         )
         
         messages = [

@@ -303,3 +303,16 @@ class LobeVectorMemory:
         )
         
         return stats
+
+async def initialize_database():
+    vector_memory = LobeVectorMemory(persist_directory="./data/vectordb")
+    
+    # Add files from a folder
+    stats = await vector_memory.add_folder(
+        folder_path="data/database",
+        file_extensions=['.txt', '.md', '.pdf']
+    )
+    
+    print(f"Database initialized: {stats['added']} files added, {stats['skipped']} skipped")
+
+    return vector_memory

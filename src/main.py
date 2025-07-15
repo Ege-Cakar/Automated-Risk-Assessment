@@ -13,6 +13,7 @@ from src.custom_code.coordinator import Coordinator
 from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.ra_team import ExpertTeam
 from src.custom_code.expert_generator import ExpertGenerator
+from src.utils.memory import initialize_database
 
 
 load_dotenv()
@@ -23,20 +24,6 @@ logger = logging.getLogger(__name__)
 DEBUG_INTERNAL_DELIBERATION = False
 
 generate_from_scratch = False
-
-# In your main.py or setup script:
-async def initialize_database():
-    vector_memory = LobeVectorMemory(persist_directory="./data/vectordb")
-    
-    # Add files from a folder
-    stats = await vector_memory.add_folder(
-        folder_path="data/database",
-        file_extensions=['.txt', '.md', '.pdf']
-    )
-    
-    print(f"Database initialized: {stats['added']} files added, {stats['skipped']} skipped")
-
-    return vector_memory
 
 
 # Usage example with current APIs
@@ -136,7 +123,7 @@ async def main():
         experts[expert["name"]] = expert_agent
     
     # Create team components
-    coordinator = Coordinator(model_client, experts, debug=True)
+    coordinator = Coordinator(model_client, experts, debug=True, swift_info=swift_info)
     summary_agent = SummaryAgent(model_client, debug=True)
     
     # Create team
@@ -158,7 +145,7 @@ async def main():
         print("\n" + "="*80)
     
     # Process a query
-    query = swift_info
+    query = risk_assessment_request 
     response = await team.consult(query)
     
     if DEBUG_INTERNAL_DELIBERATION:

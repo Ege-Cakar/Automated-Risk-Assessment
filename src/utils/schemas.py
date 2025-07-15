@@ -24,7 +24,7 @@ class TeamState(TypedDict):
     message_count: int                          # Track message limit
     max_messages: int                           # Maximum allowed messages
     concluded: bool                             # Whether conversation is done
-    coordinator_decision: str                   # "expert_name", "summarize", "end"
+    coordinator_decision: str                   # "expert_name", "summarize"
     final_report: str                          # Summary agent's final output
     debug: bool                                # Debug mode 
     

@@ -10,7 +10,7 @@ class SummaryAgent:
     """
     
     def __init__(self, model_client: ChatOpenAI, debug: bool = False):
-        self.model_client = model_client.bind_functions([create_section, read_current_document])
+        self.model_client = model_client.bind_tools([create_section, read_current_document])
         self.debug = debug
         
         self.system_message = SUMMARIZER_PROMPT

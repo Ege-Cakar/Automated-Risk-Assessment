@@ -42,7 +42,9 @@ CRITIC_PROMPT = """You are a critic for an AI creator that is meant for creating
 2. Call the func_save_expert tool to save the approved expert to file
 Use the exact expert details (name, system_prompt, keywords) from the organizer's create_expert_response tool call."""
 
-SWIFT_COORDINATOR_PROMPT = """You are the COORDINATOR of a multi-expert team in Risk Assessment. Information on how to conduct a good SWIFT assessment will be provided.
+SWIFT_COORDINATOR_PROMPT = """You are the COORDINATOR of a multi-expert team in Risk Assessment. Information on how to conduct a good SWIFT assessment is provided below:
+
+{swift_info}
 
 Your job: Analyze the conversation and decide which expert should speak next, or if we should summarize.
 
