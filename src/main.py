@@ -29,10 +29,10 @@ async def main():
     # Setup logging
     logging.basicConfig(level=logging.INFO)
     
-    whiteboard = "data/text_files/whiteboard.md"
+    report = "data/text_files/report.md"
     
-    # Clear whiteboard
-    with open(whiteboard, "w") as f:
+    # Clear report
+    with open(report, "w") as f:
         f.write("")
 
 

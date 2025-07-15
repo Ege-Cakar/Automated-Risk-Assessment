@@ -1,9 +1,10 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from src.utils.schemas import TeamState
 from src.utils.system_prompts import SWIFT_COORDINATOR_PROMPT
 import json
 import logging
+from src.utils.report import read_current_document, list_sections, merge_section
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +18,17 @@ class Coordinator:
         self,
         model_client: ChatOpenAI,
         experts: Dict[str, Any],  # Will be Expert instances
-        debug: bool = False
+        debug: bool = False,
+        tools: List[Any] = None
     ):
-        self.model_client = model_client
+        self.base_model_client = model_client
         self.experts = experts
         self.debug = debug
-        
+        self.tools = tools or [read_current_document, list_sections, merge_section]
         self.system_message = SWIFT_COORDINATOR_PROMPT
+
+        # Bind tools to create a new model client
+        self.model_client = model_client.bind_tools(self.tools)
     
     async def decide_next_action(self, state: TeamState) -> Dict[str, Any]:
         """Coordinator decides the next action"""
@@ -46,8 +51,8 @@ class Coordinator:
         conversation_summary = ""
         if state["messages"]:
             conversation_summary = "\n".join([
-                f"{msg['speaker']}: {msg['content']}" # Do not truncate messages, at least for now
-                for msg in state["messages"][-10:]  # Last 10 messages for now, I'm sure current frontier models can handle more
+                f"{msg['speaker']}: {msg['content']}"
+                for msg in state["messages"][-20:]
             ])
         
         expert_status = ""
@@ -68,7 +73,8 @@ Recent Conversation:
 
 Available Experts: {list(self.experts.keys())}
 
-Decide what to do next. Respond with valid JSON only."""
+You may use the available tools (read_current_document, list_sections, merge_section) to track progress and merge different sections if desired.
+Then decide what to do next. Your final response must be valid JSON only."""
         
         # Format system message with expert list
         formatted_system = self.system_message.format(
@@ -81,8 +87,80 @@ Decide what to do next. Respond with valid JSON only."""
         ]
         
         try:
+            # First invocation - might include tool calls
             response = await self.model_client.ainvoke(messages)
-            decision_data = json.loads(response.content.strip())
+            
+            # Handle tool calls if present
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                # Execute each tool call
+                tool_messages = messages.copy()
+                tool_messages.append(response)  # Add AI message with tool calls
+                
+                for tool_call in response.tool_calls:
+                    tool_func = None
+                    for tool in self.tools:
+                        if tool.name == tool_call['name']:
+                            tool_func = tool
+                            break
+                    
+                    if tool_func:
+                        try:
+                            # Execute the tool
+                            result = await tool_func.ainvoke(tool_call['args'])
+                            if self.debug:
+                                print(f"🔧 Coordinator used {tool_call['name']}: {result}")
+                            
+                            # Add tool result to messages
+                            tool_messages.append({
+                                "role": "tool",
+                                "content": str(result),
+                                "tool_call_id": tool_call['id']
+                            })
+                        except Exception as e:
+                            if self.debug:
+                                print(f"❌ Coordinator tool error: {e}")
+                            tool_messages.append({
+                                "role": "tool",
+                                "content": f"Error: {str(e)}",
+                                "tool_call_id": tool_call['id']
+                            })
+                
+                # Ask for the decision after tool use
+                tool_messages.append({
+                    "role": "user",
+                    "content": "Based on the tool results, please provide your decision in JSON format."
+                })
+                
+                # Get the final decision
+                follow_up = await self.model_client.ainvoke(tool_messages)
+                
+                # Extract JSON from the follow-up response
+                if follow_up.content:
+                    content = follow_up.content.strip()
+                    # Try to find JSON in the response
+                    json_start = content.find('{')
+                    json_end = content.rfind('}') + 1
+                    
+                    if json_start != -1 and json_end > json_start:
+                        json_content = content[json_start:json_end]
+                        decision_data = json.loads(json_content)
+                    else:
+                        decision_data = json.loads(content)
+                else:
+                    raise ValueError("No content in follow-up response")
+            else:
+                # No tool calls, parse JSON response normally
+                content = response.content.strip()
+                
+                # Try to find JSON in the response
+                json_start = content.find('{')
+                json_end = content.rfind('}') + 1
+                
+                if json_start != -1 and json_end > json_start:
+                    json_content = content[json_start:json_end]
+                    decision_data = json.loads(json_content)
+                else:
+                    decision_data = json.loads(content)
             
             if self.debug:
                 print(f"🧠 Coordinator Decision: {decision_data['decision']}")
@@ -111,4 +189,3 @@ Decide what to do next. Respond with valid JSON only."""
                     "keywords": ["summary"],
                     "instructions": "Create final summary"
                 }
-

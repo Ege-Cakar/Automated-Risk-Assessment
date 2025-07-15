@@ -14,7 +14,8 @@ from src.utils.schemas import TeamState
 from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.coordinator import Coordinator
 from langgraph.checkpoint.memory import MemorySaver
-import asyncio
+from langgraph.prebuilt import ToolNode
+from src.utils.report import write_to_report, read_report
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,9 @@ class ExpertTeam:
         self.debug = debug
         self.recursion_limit = recursion_limit
 
+        self.report_tools = [write_to_report, read_report]
+        self.report_tool_node = ToolNode(self.report_tools)
+
         # Build the team graph
         self.team_graph = self._build_team_graph()
     
@@ -49,7 +53,7 @@ class ExpertTeam:
         workflow = StateGraph(TeamState)
 
         # Add core nodes
-        workflow.add_node("coordinator_decide", self._coordinator_decide)
+        workflow.add_node("coordinator", self._coordinator_decide)
         workflow.add_node("generate_summary", self._generate_summary)
         workflow.add_node("finalize", self._finalize)
 
@@ -57,17 +61,17 @@ class ExpertTeam:
         for expert_name in self.experts:
             workflow.add_node(expert_name, self._expert_deliberate)
             # Each expert returns to coordinator after speaking
-            workflow.add_edge(expert_name, "coordinator_decide")
+            workflow.add_edge(expert_name, "coordinator")
 
         # Entry point
-        workflow.add_edge(START, "coordinator_decide")
+        workflow.add_edge(START, "coordinator")
 
         # Build routing map dynamically: each expert name maps to itself
         route_map = {name: name for name in self.experts}
         route_map["summarize"] = "generate_summary"
 
         workflow.add_conditional_edges(
-            "coordinator_decide",
+            "coordinator",
             self._route_after_coordinator,
             route_map,
         )

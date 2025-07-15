@@ -3,6 +3,7 @@ from typing import List, Any
 from src.utils.memory import LobeVectorMemory
 import json
 import logging
+from src.utils.report import write_to_report, read_report
 
 logger = logging.getLogger(__name__) # Do I need this?
 
@@ -95,9 +96,41 @@ class Lobe:
         ]
         
         try:
-            # Use current ChatOpenAI invoke method
-            response = await self.model_client.ainvoke(messages)
-            return response.content
+            # If tools are available, bind them to the model
+            if self.tools:
+                model_with_tools = self.model_client.bind_tools(self.tools)
+                response = await model_with_tools.ainvoke(messages)
+                
+                # Handle tool calls if present
+                if hasattr(response, 'tool_calls') and response.tool_calls:
+                    # Execute tool calls
+                    tool_results = []
+                    for tool_call in response.tool_calls:
+                        # Find the tool by name
+                        tool_func = None
+                        for tool in self.tools:
+                            if tool.name == tool_call['name']:
+                                tool_func = tool
+                                break
+                        
+                        if tool_func:
+                            try:
+                                result = await tool_func.ainvoke(tool_call['args'])
+                                tool_results.append(f"Tool {tool_call['name']} result: {result}")
+                            except Exception as e:
+                                tool_results.append(f"Tool {tool_call['name']} error: {str(e)}")
+                    
+                    # Return both the response and tool results
+                    content = response.content or ""
+                    if tool_results:
+                        content += "\n\n" + "\n".join(tool_results)
+                    return content
+                else:
+                    return response.content
+            else:
+                # No tools, use regular invoke
+                response = await self.model_client.ainvoke(messages)
+                return response.content
         except Exception as e:
             logger.error(f"Error in lobe response: {e}")
             return f"Error generating response: {str(e)}"

@@ -67,6 +67,9 @@ Rules:
 - Don't repeat the same expert back-to-back unless necessary
 - Call "summarize" when you have sufficient expert input
 - Call "end" only if the query is fully addressed
+
+There exists a central report that you and all experts will be writing to. Now, the first time you act, when no other Expert has spoken, you must use the 'write_to_report' tool to initialize the report with a title and a short 
+description of the risk assessment task, as well as the header for the first section. You will also be the one who is controlling when you move onto the next section, via creating a small section summary and writing the next section's header when you believe it to be appropriate. 
 """
 
 

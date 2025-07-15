@@ -5,6 +5,7 @@ from src.utils.memory import LobeVectorMemory
 from langgraph.graph import StateGraph, START, END
 from src.utils.schemas import ExpertState
 from src.custom_code.lobe import Lobe
+from src.utils.report import create_section, read_current_document, list_sections, propose_edit
 import logging
 
 logger = logging.getLogger(__name__)
@@ -37,9 +38,14 @@ class Expert:
             "You think carefully and provide well-reasoned responses."
         )
         
+        default_tools = [create_section, read_current_document, list_sections, propose_edit]
         # Default configurations - same prompts as AutoGen
         lobe1_config = lobe1_config or {}
         lobe2_config = lobe2_config or {}
+
+        lobe1_tools = lobe1_config.get('tools', []) + default_tools
+        lobe2_tools = lobe2_config.get('tools', []) + default_tools
+
         
         lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
 
@@ -64,6 +70,10 @@ class Expert:
         - Present scenarios one at a time
         - Wait for assessment before continuing
         - Be creative but realistic
+
+        Tools:
+        {default_tools}: You can, at any point in time, use these tools to read the central report that all of the experts are writing together and write to it.
+        
         """
 
         lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
@@ -90,9 +100,24 @@ class Expert:
         - Your CONCLUDE response becomes the expert's final answer, so answer as if the deliberation between you and the creative counterpart was done by one person.
         - Be thorough but concise in your final conclusion
         - You must always finish with handing things back to the swift_coordinator.
+
+        EXTREMELY IMPORTANT: 
+        Before you hand things off to the coordinator, you must create your section:
+        1. First, use list_sections to see what domains have been covered
+        2. Use read_current_document to understand the overall structure
+        3. Use create_section with your domain name to add your analysis
+        4. Your section should be comprehensive and well-structured markdown
+        5. Include: Key Risks, Severity Analysis, Mitigations, Dependencies
+
+        Example section creation:
+        create_section(
+            domain="authentication_risks",
+            content="### Key Findings\\n\\n1. **Password Policy Risks**\\n   - Severity: High\\n   - ...",
+            author="Authentication_Security_Expert"
+        )
         """
         
-        domain_specific_prompt = f"""{self._base_system_message}
+        domain_specific_prompt = f"""{self._base_system_message} 
 
         DOMAIN EXPERTISE: Apply your specialized knowledge to the internal deliberation.
         
@@ -114,7 +139,7 @@ class Expert:
             keywords=lobe1_config.get('keywords', []),
             temperature=lobe1_config.get('temperature', 0.8),
             system_message=lobe1_full_message,
-            tools=lobe1_config.get('tools', [])
+            tools=lobe1_tools
         )
         
         self._lobe2 = Lobe(
@@ -124,7 +149,7 @@ class Expert:
             keywords=lobe2_config.get('keywords', []),
             temperature=lobe2_config.get('temperature', 0.4),
             system_message=lobe2_full_message,
-            tools=lobe2_config.get('tools', [])
+            tools=lobe2_tools
         )
         
         # Build the internal deliberation graph using current LangGraph patterns
