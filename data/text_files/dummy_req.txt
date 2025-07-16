@@ -1,52 +1,45 @@
-Risk Assessment Request: Government Medical Records Portal Login System
+University of Cambridge
+Department of Engineering
 
-Executive Summary
+FORMAL REQUEST FOR RISK ASSESSMENT
 
-This document outlines a formal request for a comprehensive risk assessment of a proposed multi-factor authentication login system for the Government Health Information Portal (GHIP). The system will enable citizens to securely access their personal medical records, test results, vaccination history, and healthcare provider information through a centralized online platform.
+To: University Safety Office
+From: Per Ola Kristensson, Estates & Facilities Division
+Date: July 16, 2025
+Subject: Risk Assessment Request for New Fire Alarm System Deployment – Department of Engineering Buildings
 
-Project Overview
+This document is a formal request for a comprehensive risk assessment to be conducted for the planned deployment of a new, addressable fire alarm system across all buildings of the Department of Engineering, located on the Trumpington Street site.
 
-Project Name
+1.0 Project Description
+The project involves the decommissioning of the existing fire alarm system and the full installation, testing, and commissioning of a modern, site-wide addressable fire alarm system. This upgrade is essential to enhance the life safety provisions within the department and ensure compliance with current fire safety standards.
 
-Government Health Information Portal - Secure Login System Implementation
+The work will be undertaken by an approved external contractor and will encompass all areas, including laboratories, workshops, lecture theatres, offices, and common spaces.
 
-Project Scope
+Proposed Start Date: October 1, 2025
 
-Development and deployment of a secure authentication system that will serve as the primary access control mechanism for citizens accessing their medical records through the government health portal.
+Estimated Completion Date: March 31, 2026
 
-Technical Architecture
+2.0 Scope of Assessment
+A thorough risk assessment is required before any work commences to identify potential hazards and establish robust control measures. The assessment should be conducted in accordance with the Health and Safety at Work etc. Act 1974 and the Regulatory Reform (Fire Safety) Order 2005.
 
-Platform: Web-based application with mobile responsive design
-Authentication Methods:
-Multi-factor authentication (MFA) mandatory
-Primary: Username/password + SMS/email verification
-Secondary: Hardware security keys (FIDO2/WebAuthn)
-Biometric options: Fingerprint and facial recognition (mobile app)
-Integration Points:
-National Identity Database
-Healthcare Provider Networks
-Insurance Systems
-Prescription Database
-Data Storage: Government-certified cloud infrastructure with end-to-end encryption
-Functional Requirements
+Key areas to be considered should include, but are not limited to:
 
-User registration and identity verification
-Secure login with multi-factor authentication
-Session management and automatic timeout
-Password reset and account recovery
-Access logging and audit trail
-Account lockout after failed attempts
-Privacy controls and consent management
+Hot Work: Potential for soldering, brazing, or cutting during installation.
 
-Data Classification and Sensitivity
+Electrical Hazards: Isolation of circuits, connection of new system components, and management of temporary wiring.
 
-Data Types Handled
+Working at Height: Use of ladders, scaffolding, or mobile elevating work platforms (MEWPs) for cabling and device installation.
 
-Highly Sensitive: Medical diagnoses, treatment history, mental health records
-Sensitive: Personal identifying information, contact details, insurance information
-Internal Use: System logs, authentication tokens, session data
+Asbestos: Management of potential disturbance to asbestos-containing materials (ACMs) in older sections of the buildings.
 
-Regulatory Compliance Requirements
+System Crossover: Risks associated with the period when the old system is being decommissioned and the new system is not yet fully operational.
 
-HIPAA (Health Insurance Portability and Accountability Act)
-GDPR (General Data Protection Regulation)
+Disruption: Noise, dust, and obstruction of access/egress routes.
+
+Contractor Management: Ensuring contractor competency, safe systems of work, and coordination with departmental activities.
+
+False Alarms: Procedures for managing and communicating potential false alarms during the testing and commissioning phase.
+
+3. Action required
+
+Work on-site cannot be authorized until the risk assessment is formally completed and approved. Please generate a thorough risk assessment that leaves no stone unturned and submit it to the University for approval.

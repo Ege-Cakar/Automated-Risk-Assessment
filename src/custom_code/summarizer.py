@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from src.utils.schemas import TeamState
 from src.utils.system_prompts import SUMMARIZER_PROMPT
 from src.utils.report import read_current_document, create_section
+from langchain_google_genai import ChatGoogleGenerativeAI
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ class SummaryAgent:
     Specialized agent that synthesizes all expert contributions into a final report.
     """
     
-    def __init__(self, model_client: ChatOpenAI, debug: bool = False):
+    def __init__(self, model_client: ChatGoogleGenerativeAI or ChatOpenAI, debug: bool = False):
         self.model_client = model_client.bind_tools([create_section, read_current_document])
         self.debug = debug
         
@@ -41,7 +42,12 @@ Expert Contributions:
 Full Conversation Log:
 {conversation_log}
 
-Create the comprehensive final section that synthesizes all expert input. To that end, be sure to read all existing sections with read_current_document. Create a new section called "Final Summary" and write the summary there using create_section."""
+Create the comprehensive final section that synthesizes all expert input. To that end, be sure to read all existing sections with read_current_document. Create a new section called "Final Summary" and write the summary there using create_section.
+
+Make sure all details and arguments are preserved. Be comprehensive. Be specific. And be clear in your arguments.
+
+I want you to have arguments clearly laid out. I want you to be thorough. 
+"""
         
         messages = [
             {"role": "system", "content": self.system_message},

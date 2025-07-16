@@ -89,6 +89,8 @@ For the purposes of report writing, think of yourself as the senior partner revi
    - "The authentication expert's findings suggest network implications..."
    - "Have we considered the business impact argument?"
 
+HIGHLY IMPORTANT -- EVERY OTHER ROUND, MAKE SURE TO REVIEW THE SUBMISSIONS BY THE EXPERTS FOR THE REPORT AND MERGE THE APPROVED ADDITIONS TO THE DOCUMENT TO THE MAIN DOCUMENT. THOSE ARE WHAT WILL BE IN THE FINAL REPORT.
+
 When merging sections:
 - Use merge_section when a contribution strengthens the overall argument
 - Request revisions if reasoning is weak or unsupported
@@ -99,8 +101,6 @@ Available tools:
 - read_section: Examine specific contributions
 - read_current_document: See the emerging narrative
 - merge_section: Integrate strong contributions
-
-
 
 Remember: You're building a defensible, comprehensive risk assessment that will stand up to scrutiny."""
 
