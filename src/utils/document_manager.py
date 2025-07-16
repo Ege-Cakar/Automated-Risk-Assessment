@@ -4,6 +4,8 @@ from datetime import datetime
 import json
 import uuid
 from enum import Enum
+import os 
+from pathlib import Path 
 
 class SectionStatus(Enum):
     DRAFT = "draft"
@@ -41,6 +43,12 @@ class DocumentManager:
         self.sections: Dict[str, Section] = {}
         self.history: List[DocumentChange] = []
         self.current_document: Dict[str, str] = {}  # section_id -> content
+
+        # Create directory if it doesn't exist
+        Path(self.base_path).mkdir(parents=True, exist_ok=True)
+        
+        # Load existing data if available
+        self._load_from_disk()
         
     def create_section(self, domain: str, author: str, content: str) -> str:
         """Create a new draft section"""
@@ -61,6 +69,8 @@ class DocumentManager:
             content_after=content
         )
         self.history.append(change)
+
+        self.save_to_disk()
         
         return section_id
     
@@ -93,7 +103,7 @@ class DocumentManager:
             rationale=rationale
         )
         self.history.append(change)
-        
+        self.save_to_disk()        
         return new_version_id
     
     def merge_to_document(self, section_id: str, coordinator_notes: str = "") -> bool:
@@ -115,6 +125,8 @@ class DocumentManager:
             rationale=coordinator_notes
         )
         self.history.append(change)
+
+        self.save_to_disk()
         
         return True
     
@@ -129,3 +141,107 @@ class DocumentManager:
             md_parts.append("\n\n")
             
         return "".join(md_parts)
+    
+    def _section_to_dict(self, section: Section) -> Dict[str, Any]:
+        """Convert Section to dictionary for JSON serialization"""
+        return {
+            "section_id": section.section_id,
+            "domain": section.domain,
+            "author": section.author,
+            "content": section.content,
+            "version": section.version,
+            "status": section.status.value,
+            "created_at": section.created_at.isoformat(),
+            "updated_at": section.updated_at.isoformat(),
+            "parent_version": section.parent_version,
+            "metadata": section.metadata
+        }
+    
+    def _dict_to_section(self, data: Dict[str, Any]) -> Section:
+        """Convert dictionary to Section object"""
+        return Section(
+            section_id=data["section_id"],
+            domain=data["domain"],
+            author=data["author"],
+            content=data["content"],
+            version=data["version"],
+            status=SectionStatus(data["status"]),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+            parent_version=data.get("parent_version"),
+            metadata=data.get("metadata", {})
+        )
+    
+    def _change_to_dict(self, change: DocumentChange) -> Dict[str, Any]:
+        """Convert DocumentChange to dictionary for JSON serialization"""
+        return {
+            "change_id": change.change_id,
+            "section_id": change.section_id,
+            "author": change.author,
+            "change_type": change.change_type,
+            "content_before": change.content_before,
+            "content_after": change.content_after,
+            "rationale": change.rationale,
+            "timestamp": change.timestamp.isoformat()
+        }
+    
+    def _dict_to_change(self, data: Dict[str, Any]) -> DocumentChange:
+        """Convert dictionary to DocumentChange object"""
+        return DocumentChange(
+            change_id=data["change_id"],
+            section_id=data["section_id"],
+            author=data["author"],
+            change_type=data["change_type"],
+            content_before=data.get("content_before"),
+            content_after=data.get("content_after"),
+            rationale=data.get("rationale"),
+            timestamp=datetime.fromisoformat(data["timestamp"])
+        )
+    
+    def save_to_disk(self):
+        """Save current state to JSON files"""
+        # Save sections
+        sections_data = {
+            sid: self._section_to_dict(section) 
+            for sid, section in self.sections.items()
+        }
+        with open(os.path.join(self.base_path, "sections.json"), "w") as f:
+            json.dump(sections_data, f, indent=2)
+        
+        # Save history
+        history_data = [self._change_to_dict(change) for change in self.history]
+        with open(os.path.join(self.base_path, "history.json"), "w") as f:
+            json.dump(history_data, f, indent=2)
+        
+        # Save current document
+        with open(os.path.join(self.base_path, "current_document.json"), "w") as f:
+            json.dump(self.current_document, f, indent=2)
+        
+        # Also save markdown version
+        with open(os.path.join(self.base_path, "report.md"), "w") as f:
+            f.write(self.get_current_document_markdown())
+    
+    def _load_from_disk(self):
+        """Load state from JSON files if they exist"""
+        # Load sections
+        sections_file = os.path.join(self.base_path, "sections.json")
+        if os.path.exists(sections_file):
+            with open(sections_file, "r") as f:
+                sections_data = json.load(f)
+                self.sections = {
+                    sid: self._dict_to_section(data) 
+                    for sid, data in sections_data.items()
+                }
+        
+        # Load history
+        history_file = os.path.join(self.base_path, "history.json")
+        if os.path.exists(history_file):
+            with open(history_file, "r") as f:
+                history_data = json.load(f)
+                self.history = [self._dict_to_change(data) for data in history_data]
+        
+        # Load current document
+        current_doc_file = os.path.join(self.base_path, "current_document.json")
+        if os.path.exists(current_doc_file):
+            with open(current_doc_file, "r") as f:
+                self.current_document = json.load(f)

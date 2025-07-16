@@ -14,6 +14,7 @@ from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.ra_team import ExpertTeam
 from src.custom_code.expert_generator import ExpertGenerator
 from src.utils.memory import initialize_database
+from pathlib import Path
 
 
 load_dotenv()
@@ -30,6 +31,9 @@ generate_from_scratch = False
 async def main():
     # Setup logging
     logging.basicConfig(level=logging.INFO)
+
+    Path("data/report").mkdir(parents=True, exist_ok=True)
+    Path("data/conversations").mkdir(parents=True, exist_ok=True)
     
     report = "data/text_files/report.md"
     
@@ -132,7 +136,8 @@ async def main():
         experts=experts,
         summary_agent=summary_agent,
         max_messages=30,
-        debug=DEBUG_INTERNAL_DELIBERATION
+        debug=DEBUG_INTERNAL_DELIBERATION,
+        conversation_path="data/conversations",
     )
     
     png = team.team_graph.get_graph().draw_mermaid_png()

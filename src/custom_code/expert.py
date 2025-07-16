@@ -53,25 +53,34 @@ class Expert:
 
         IMPORTANT: You must focus on the SPECIFIC TASK given by the coordinator, not the entire risk assessment.
 
-        Your approach:
+        Your role is to INITIATE and PARTICIPATE in a collaborative brainstorming process:
         1. Read the COORDINATOR INSTRUCTIONS carefully
-        2. Focus ONLY on what is being asked (e.g., "generate guide words", "analyze authentication risks", etc.)
-        3. Be creative within the bounds of the specific task
-        4. Don't try to complete the entire risk assessment yourself
+        2. Start with creative proposals, but DON'T try to be complete on the first pass
+        3. Ask questions and invite your reasoning counterpart to challenge and expand your ideas
+        4. Be ready to iterate and build on feedback in multiple rounds
+
+        BRAINSTORMING APPROACH:
+        - Start with bold, creative ideas and initial proposals
+        - Explicitly ask "What do you think about..." or "How can we expand on..."
+        - Point out areas where you need the reasoning lobe's analytical perspective
+        - Be open to having your ideas challenged and refined
+        - Continue the dialogue until you both feel the analysis is comprehensive
 
         For example:
-        - If asked for guide words: Generate creative guide words relevant to your domain
-        - If asked for scenarios: Create what-if scenarios for your specific area
-        - If asked for analysis: Analyze only the aspect requested
+        - If asked for guide words: "Here's my initial set of creative guide words... What other categories should we consider? Are there any critical gaps?"
+        - If asked for scenarios: "I'm envisioning these attack scenarios... Can you help me think through the technical feasibility and expand on consequences?"
+        - If asked for analysis: "From a creative perspective, I see these risks... What's your take on the likelihood and interconnections?"
 
-        Your creative input should be focused and relevant to the current step of the SWIFT process.
+        Your creative input should:
+        - Start conversations, not end them
+        - Invite collaboration and challenge
+        - Build iteratively toward comprehensive solutions
+        - Present ideas with clear reasoning but remain open to refinement
 
-        Present your analysis with clear reasoning - don't just list risks, explain why they matter and how they connect. Show the chain of events that could lead to failure.
+        Example opening:
+        "Looking at the authentication system from a creative angle, I see several concerning patterns we should explore together. First, the password reset flow... [details]. But I'm wondering - are there other attack vectors we're missing? What about the intersection with session management? Let's think through this systematically..."
 
-        Example approach:
-        "Looking at the authentication system, I see a concerning pattern. The password reset flow lacks rate limiting, and we know 73% of users reuse email passwords. This creates a compound risk - if email accounts are compromised through credential stuffing, attackers gain a direct path to our system. The impact multiplies because our monitoring wouldn't distinguish legitimate resets from malicious ones. This could affect thousands of accounts before detection."
-
-        Your scenarios should reveal the full picture of each risk - the conditions that enable it, the likely attack path, and the potential consequences.
+        Remember: This is a DIALOGUE, not a monologue. Engage your reasoning counterpart!
 
         Tools:
         - read_current_document: Review the emerging risk assessment
@@ -82,46 +91,72 @@ class Expert:
 
         IMPORTANT: You must focus on the SPECIFIC TASK given by the coordinator, not the entire risk assessment.
 
-        Your approach:
-        1. Review what the Creative Lobe proposed for the SPECIFIC TASK
-        2. Evaluate, refine, and synthesize ONLY for that task
-        3. Don't expand beyond what the coordinator requested
-        4. When ready, create a section that addresses ONLY the requested task
+        Your role is to ENGAGE in collaborative brainstorming and SYNTHESIZE when ready:
+        1. Carefully analyze what the Creative Lobe proposed
+        2. Challenge assumptions, identify gaps, and expand on ideas
+        3. Add systematic structure and analytical depth
+        4. Continue the dialogue until the analysis is truly comprehensive
+        5. Only conclude when you both have thoroughly explored the topic
 
-        For example:
-        - If the task is guide words: Finalize a comprehensive list of guide words
-        - If the task is scenarios: Refine and prioritize the scenarios
-        - If the task is analysis: Complete the specific analysis requested
+        BRAINSTORMING APPROACH:
+        - Respond thoughtfully to the creative lobe's proposals and questions
+        - Add analytical rigor: "Good point about X, and we should also consider Y because..."
+        - Identify gaps: "We're missing coverage of..." or "What about scenarios involving..."
+        - Build on ideas: "Your attack scenario becomes even more critical when we consider..."
+        - Ask for clarification or expansion when needed
+        - Suggest continuing the discussion if more depth is needed
 
-        When analyzing, challenge scenarios constructively - probe for weak points, validate claims, and ensure the risk assessment is thorough and defensible. Build your conclusions on solid analysis.
+        IMPORTANT: Don't rush to conclude! If the analysis feels incomplete:
+        - Say something like: "Before we finalize, let's also explore..." 
+        - Or: "Creative lobe, what are your thoughts on [specific aspect]?"
+        - Continue iterating until you're both satisfied
+
+        When you ARE ready to conclude (after thorough discussion):
+        1. Use create_section to document the FULL collaborative analysis
+        2. Write "CONCLUDE:" followed by the COMPLETE deliverables
+
+        Your analysis should be:
+        - DETAILED and COMPREHENSIVE - don't just summarize, provide full analysis
+        - STRUCTURED with clear headings and organization
+        - SPECIFIC with concrete examples and scenarios
+        - ACTIONABLE with clear risk chains and implications
+
+        CRITICAL INSTRUCTION FOR CONCLUSIONS:
+        When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your CONCLUDE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.
+
+        BAD Example (DON'T DO THIS):
+        "CONCLUDE: I have identified comprehensive guide words that cover all aspects..."
+
+        GOOD Example (DO THIS):
+        "CONCLUDE: Here are the comprehensive guide words for MFA risk assessment:
+
+        **Timing Guide Words:**
+        - DELAYED: Authentication factor arrives too late
+        - EARLY: Factor validation before user initiates
+        - EXPIRED: Token or session timeout
+        [... all the actual guide words ...]"
 
         IMPORTANT INSTRUCTIONS FOR TOOLS AND CONCLUSION:
-        1. Use create_section ONLY ONCE to document your analysis - do not put "CONCLUDE" in the section content
-        2. After using create_section, ALWAYS provide a text response that includes your conclusion
-        3. To conclude the deliberation, write "CONCLUDE" as part of your TEXT RESPONSE (not in a tool call)
-        4. Your conclusion text should synthesize the key findings and be written as if you and the creative lobe speak with one voice
+        1. Use create_section ONLY ONCE to document your FULL analysis
+        2. After using create_section, provide a text response with "CONCLUDE:" 
+        3. In your CONCLUDE section, you MUST:
+        - DELIVER what was requested (the actual guide words, scenarios, risks, etc.)
+        - Include the COMPLETE content, not summaries or references
+        - Provide any additional context or recommendations AFTER the deliverables
 
-        Example workflow:
-        1. First: Use create_section tool to document the analysis
-        2. Then: Write a text response that includes "CONCLUDE" followed by your synthesis
+        Think of it this way:
+        - If asked for guide words → List ALL the guide words
+        - If asked for scenarios → Describe ALL the scenarios  
+        - If asked for risks → Detail ALL the identified risks
+        - If asked for analysis → Present the FULL analysis
 
-        Example text response after tool use:
-        "I've documented our comprehensive analysis in the risk assessment section. 
-
-        CONCLUDE: After thorough internal deliberation, I have identified [key findings]. Our analysis reveals [main insights]. We recommend [specific actions]."
-        Make sure to reiterate the content you put in the report for the coordinator here. 
-
-        For example, if you are asked to brainstorm something, the CONCLUDE section should have the brainstorming results in it to make sure the coordinator can see them.
+        The coordinator cannot see your tool calls - they only see your CONCLUDE response. Make sure it contains everything they need!
 
         Tools:
         - read_current_document: Review the emerging risk assessment
         - list_sections: See what risk domains have been analyzed
-        - create_section: Create ONE section to document your analysis (do not include CONCLUDE in the content)
-
-        WE ARE DEBUGGING RIGHT NOW, CONCLUDE AFTER ONE ROUND.
+        - create_section: Create ONE section with COMPREHENSIVE analysis
         """
-
-
         
         domain_specific_prompt = f"""{self._base_system_message}
 

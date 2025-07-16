@@ -15,6 +15,10 @@ from src.custom_code.summarizer import SummaryAgent
 from src.custom_code.coordinator import Coordinator
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
+import os
+from pathlib import Path
+from datetime import datetime
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +35,8 @@ class ExpertTeam:
         summary_agent: SummaryAgent,
         max_messages: int = 20,
         recursion_limit: int = 75,
-        debug: bool = False
+        debug: bool = False,
+        conversation_path: str = "conversation.json"
     ):
         self.coordinator = coordinator
         self.experts = experts
@@ -39,6 +44,12 @@ class ExpertTeam:
         self.max_messages = max_messages
         self.debug = debug
         self.recursion_limit = recursion_limit
+        self.conversation_path = conversation_path
+
+        Path(self.conversation_path).mkdir(parents=True, exist_ok=True)
+        
+        # Generate unique conversation ID
+        self.conversation_id = f"conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         # Build the team graph
         self.team_graph = self._build_team_graph()
@@ -77,12 +88,70 @@ class ExpertTeam:
         workflow.add_edge("finalize", END)
     
         return workflow.compile()
+
+    def _save_conversation_state(self, state: TeamState, step_name: str):
+        """Save current conversation state to JSON"""
+        # Create a serializable version of the state
+        serializable_state = {
+            "conversation_id": self.conversation_id,
+            "timestamp": datetime.now().isoformat(),
+            "step": step_name,
+            "query": state.get("query", ""),
+            "message_count": state.get("message_count", 0),
+            "max_messages": state.get("max_messages", 0),
+            "current_speaker": state.get("current_speaker", ""),
+            "coordinator_decision": state.get("coordinator_decision", ""),
+            "coordinator_instructions": state.get("coordinator_instructions", ""),
+            "conversation_keywords": state.get("conversation_keywords", []),
+            "messages": state.get("messages", []),
+            "expert_responses": state.get("expert_responses", {}),
+            "final_report": state.get("final_report", ""),
+            "concluded": state.get("concluded", False)
+        }
+        
+        # Save to timestamped file
+        filename = f"{self.conversation_id}_{state.get('message_count', 0):03d}_{step_name}.json"
+        filepath = os.path.join(self.conversation_path, filename)
+        
+        with open(filepath, "w") as f:
+            json.dump(serializable_state, f, indent=2)
+        
+        # Also save a "latest" version that always has the current state
+        latest_filepath = os.path.join(self.conversation_path, f"{self.conversation_id}_latest.json")
+        with open(latest_filepath, "w") as f:
+            json.dump(serializable_state, f, indent=2)
+        
+        # Save a human-readable conversation log
+        self._save_conversation_log(state)
+
+    def _save_conversation_log(self, state: TeamState):
+        """Save human-readable conversation log"""
+        log_filepath = os.path.join(self.conversation_path, f"{self.conversation_id}_log.md")
+        
+        with open(log_filepath, "w") as f:
+            f.write(f"# Conversation Log: {self.conversation_id}\n\n")
+            f.write(f"**Query**: {state.get('query', '')}\n\n")
+            f.write(f"**Started**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write("---\n\n")
+            
+            for msg in state.get("messages", []):
+                speaker = msg.get("speaker", "Unknown")
+                content = msg.get("content", "")
+                
+                f.write(f"## {speaker}\n\n")
+                f.write(f"{content}\n\n")
+                f.write("---\n\n")
+            
+            if state.get("final_report"):
+                f.write("## Final Report\n\n")
+                f.write(state.get("final_report", ""))
+                f.write("\n\n")
     
     async def _coordinator_decide(self, state: TeamState) -> TeamState:
         """Coordinator decides next action"""
         decision_data = await self.coordinator.decide_next_action(state)
         
-        return {
+        new_state = {
             **state,
             "coordinator_decision": decision_data["decision"],
             "coordinator_instructions": decision_data["instructions"],
@@ -92,6 +161,10 @@ class ExpertTeam:
                 "content": f"Decision: {decision_data['decision']} | Reasoning: {decision_data['reasoning']}"
             }]
         }
+
+        self._save_conversation_state(new_state, "coordinator_decide")
+
+        return new_state
     
     async def _expert_deliberate(self, state: TeamState) -> TeamState:
         """Run expert deliberation and return to coordinator"""
@@ -136,7 +209,7 @@ class ExpertTeam:
         # Get expert response with team context
         expert_response = await expert.process_message(current_instruction, team_context)
         
-        return {
+        new_state = {
             **state,
             "expert_responses": {**state["expert_responses"], expert_name: expert_response},
             "message_count": state["message_count"] + 1,
@@ -147,12 +220,16 @@ class ExpertTeam:
             "current_speaker": "Coordinator"
         }
 
+        self._save_conversation_state(new_state, f"expert_{expert_name}")
+
+        return new_state
+
         
     async def _generate_summary(self, state: TeamState) -> TeamState:
         """Generate final summary"""
         final_report = await self.summary_agent.generate_summary(state)
         
-        return {
+        new_state = {
             **state,
             "final_report": final_report,
             "concluded": True,
@@ -161,6 +238,10 @@ class ExpertTeam:
                 "content": final_report
             }]
         }
+
+        self._save_conversation_state(new_state, "summary")
+
+        return new_state
     
     async def _finalize(self, state: TeamState) -> TeamState:
         """Finalize the conversation"""
@@ -169,7 +250,24 @@ class ExpertTeam:
             print(f"📊 Total messages: {state['message_count']}")
             print(f"👥 Experts consulted: {list(state['expert_responses'].keys())}")
         
-        return {**state, "concluded": True}
+        final_state = {**state, "concluded": True}
+        
+        # Save final state
+        self._save_conversation_state(final_state, "finalize")
+        
+        # Create a summary file
+        summary_filepath = os.path.join(self.conversation_path, f"{self.conversation_id}_summary.json")
+        with open(summary_filepath, "w") as f:
+            json.dump({
+                "conversation_id": self.conversation_id,
+                "completed_at": datetime.now().isoformat(),
+                "query": state.get("query", ""),
+                "total_messages": state.get("message_count", 0),
+                "experts_consulted": list(state.get("expert_responses", {}).keys()),
+                "final_report_preview": state.get("final_report", "")[:500] + "..."
+            }, f, indent=2)
+        
+        return final_state
     
     def _route_after_coordinator(self, state: TeamState) -> str:
         """Return the next node key based on coordinator decision"""

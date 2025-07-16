@@ -12,6 +12,8 @@ __pycache__/
 cmb
 data/database/
 data/vectordb/
+data/conversations/
+data/report
 
 planning.md
 
