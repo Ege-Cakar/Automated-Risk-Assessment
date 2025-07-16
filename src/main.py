@@ -21,7 +21,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Debug flag - Set to True to see internal deliberation, False for quiet mode
-DEBUG_INTERNAL_DELIBERATION = False
+DEBUG_INTERNAL_DELIBERATION = True
 
 generate_from_scratch = False
 
@@ -118,13 +118,13 @@ async def main():
             system_message=expert["system_prompt"],
             lobe1_config=lobe1_config,
             lobe2_config=lobe2_config,
-            debug=False  # Let team handle debug output
+            debug=DEBUG_INTERNAL_DELIBERATION  # Let team handle debug output
         )
         experts[expert["name"]] = expert_agent
     
     # Create team components
-    coordinator = Coordinator(model_client, experts, debug=True, swift_info=swift_info)
-    summary_agent = SummaryAgent(model_client, debug=True)
+    coordinator = Coordinator(model_client, experts, debug=DEBUG_INTERNAL_DELIBERATION, swift_info=swift_info)
+    summary_agent = SummaryAgent(model_client, debug=DEBUG_INTERNAL_DELIBERATION)
     
     # Create team
     team = ExpertTeam(
@@ -132,7 +132,7 @@ async def main():
         experts=experts,
         summary_agent=summary_agent,
         max_messages=30,
-        debug=True
+        debug=DEBUG_INTERNAL_DELIBERATION
     )
     
     png = team.team_graph.get_graph().draw_mermaid_png()

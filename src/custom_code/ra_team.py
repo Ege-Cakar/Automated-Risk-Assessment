@@ -85,6 +85,7 @@ class ExpertTeam:
         return {
             **state,
             "coordinator_decision": decision_data["decision"],
+            "coordinator_instructions": decision_data["instructions"],
             "conversation_keywords": decision_data.get("keywords", state.get("conversation_keywords", [])),
             "messages": state["messages"] + [{
                 "speaker": "Coordinator",
@@ -100,15 +101,40 @@ class ExpertTeam:
         # Update expert keywords if provided
         if state.get("conversation_keywords"):
             await expert.update_keywords(
-                lobe1_keywords=state["conversation_keywords"] + ["creative", "scenarios"],
-                lobe2_keywords=state["conversation_keywords"] + ["analysis", "risk"]
+                lobe1_keywords=state["conversation_keywords"],
+                lobe2_keywords=state["conversation_keywords"]
             )
         
         if self.debug:
             print(f"\n🔄 {expert_name} starting deliberation...")
         
-        # Get expert response using their internal deliberation
-        expert_response = await expert.process_message(state["query"])
+        # Build team conversation context (without internal deliberations)
+        team_context = f"User Query: {state['query']}\n\n"
+        
+        for msg in state["messages"]:
+            speaker = msg["speaker"]
+            content = msg["content"]
+            
+            if speaker == "Coordinator":
+                # Clean up coordinator messages
+                if "Decision:" in content and "Reasoning:" in content:
+                    reasoning_part = content.split("Reasoning:")[1].strip()
+                    team_context += f"Coordinator: {reasoning_part}\n\n"
+                else:
+                    team_context += f"Coordinator: {content}\n\n"
+            else:
+                # Expert final responses only
+                team_context += f"{speaker}: {content}\n\n"
+        
+        # Get the current instruction from coordinator
+        current_instruction = ""
+        for msg in reversed(state["messages"]):
+            if msg["speaker"] == "Coordinator" and "Reasoning:" in msg["content"]:
+                current_instruction = msg["content"].split("Reasoning:")[1].strip()
+                break
+        
+        # Get expert response with team context
+        expert_response = await expert.process_message(current_instruction, team_context)
         
         return {
             **state,
@@ -118,9 +144,10 @@ class ExpertTeam:
                 "speaker": expert_name,
                 "content": expert_response
             }],
-            "current_speaker": "Coordinator"  # Always return to coordinator
+            "current_speaker": "Coordinator"
         }
-    
+
+        
     async def _generate_summary(self, state: TeamState) -> TeamState:
         """Generate final summary"""
         final_report = await self.summary_agent.generate_summary(state)

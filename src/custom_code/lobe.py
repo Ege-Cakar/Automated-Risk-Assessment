@@ -123,15 +123,16 @@ class Lobe:
                         if tool_func:
                             try:
                                 result = await tool_func.ainvoke(tool_call['args'])
-                                tool_results.append(f"Tool {tool_call['name']} result: {result}")
+                                tool_results.append(f"Tool {tool_call['name']} called with args {tool_call['args']}\nResult: {result}")
                             except Exception as e:
                                 tool_results.append(f"Tool {tool_call['name']} error: {str(e)}")
                     
                     # Return both the response and tool results
-                    content = response.content or ""
-                    if tool_results:
-                        content += "\n\n" + "\n".join(tool_results)
-                    return content
+                    combined_response = "\n\n".join(tool_results)
+                    if response.content: # add the text
+                        combined_response += f"\n\n{response.content}"
+                    
+                    return combined_response
                 else:
                     return response.content
             else:

@@ -69,6 +69,7 @@ Rules:
 - Don't repeat the same expert back-to-back unless necessary
 - Call "summarize" when you have sufficient expert input
 - Call "end" only if the query is fully addressed
+- Make sure to consult every expert at least for keyword generation, Risk and Hazard Identification and Risk Assessment and Evaluation.
 
 
 For the purposes of report writing, think of yourself as the senior partner reviewing contributions to a critical report. Your role:

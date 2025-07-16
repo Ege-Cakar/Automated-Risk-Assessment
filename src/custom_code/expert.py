@@ -32,6 +32,9 @@ class Expert:
         self._max_rounds = max_rounds
         self.description = description
         self.debug = debug  # Store debug flag
+
+        self._internal_conversation = []
+        self._team_conversation_context = ""
         
         self._base_system_message = system_message if system_message else (
             "You are an expert assistant with deep knowledge in your domain. "
@@ -48,13 +51,20 @@ class Expert:
 
         lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
 
-        Your job: Generate comprehensive risk scenarios and identify vulnerabilities in your domain.
+        IMPORTANT: You must focus on the SPECIFIC TASK given by the coordinator, not the entire risk assessment.
 
-        Focus on:
-        - Identifying interconnected risks and cascading failures
-        - Exploring edge cases and non-obvious attack vectors  
-        - Considering both technical and business impacts
-        - Building thorough risk narratives that show cause and effect
+        Your approach:
+        1. Read the COORDINATOR INSTRUCTIONS carefully
+        2. Focus ONLY on what is being asked (e.g., "generate guide words", "analyze authentication risks", etc.)
+        3. Be creative within the bounds of the specific task
+        4. Don't try to complete the entire risk assessment yourself
+
+        For example:
+        - If asked for guide words: Generate creative guide words relevant to your domain
+        - If asked for scenarios: Create what-if scenarios for your specific area
+        - If asked for analysis: Analyze only the aspect requested
+
+        Your creative input should be focused and relevant to the current step of the SWIFT process.
 
         Present your analysis with clear reasoning - don't just list risks, explain why they matter and how they connect. Show the chain of events that could lead to failure.
 
@@ -70,33 +80,47 @@ class Expert:
 
         lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
 
-        Your job: Evaluate risk scenarios critically and synthesize a thorough assessment.
+        IMPORTANT: You must focus on the SPECIFIC TASK given by the coordinator, not the entire risk assessment.
 
         Your approach:
-        1. Assess likelihood and impact of each scenario
-        2. Identify which assumptions are strongest/weakest
-        3. Consider mitigating factors and existing controls
-        4. Determine risk priorities based on evidence
-        5. Formulate actionable recommendations
+        1. Review what the Creative Lobe proposed for the SPECIFIC TASK
+        2. Evaluate, refine, and synthesize ONLY for that task
+        3. Don't expand beyond what the coordinator requested
+        4. When ready, create a section that addresses ONLY the requested task
 
-        Challenge scenarios constructively - probe for weak points, validate claims, and ensure the risk assessment is thorough and defensible. Build your conclusions on solid analysis.
+        For example:
+        - If the task is guide words: Finalize a comprehensive list of guide words
+        - If the task is scenarios: Refine and prioritize the scenarios
+        - If the task is analysis: Complete the specific analysis requested
 
-        When you CONCLUDE and create your section:
-        Write a comprehensive risk assessment for your domain that:
-        - Clearly states the key risks and their relationships
-        - Explains your reasoning for risk ratings
-        - Justifies your recommendations with evidence
-        - Acknowledges uncertainties where they exist
+        When analyzing, challenge scenarios constructively - probe for weak points, validate claims, and ensure the risk assessment is thorough and defensible. Build your conclusions on solid analysis.
 
-        Your section should flow naturally - present the risks, analyze their likelihood and impact, explain the reasoning, and conclude with specific recommendations. The argument should be embedded in professional risk assessment language.
+        IMPORTANT INSTRUCTIONS FOR TOOLS AND CONCLUSION:
+        1. Use create_section ONLY ONCE to document your analysis - do not put "CONCLUDE" in the section content
+        2. After using create_section, ALWAYS provide a text response that includes your conclusion
+        3. To conclude the deliberation, write "CONCLUDE" as part of your TEXT RESPONSE (not in a tool call)
+        4. Your conclusion text should synthesize the key findings and be written as if you and the creative lobe speak with one voice
 
-        Example section style:
-        "The authentication system faces significant risk from password reset vulnerabilities. Our analysis identifies unlimited reset attempts combined with high email password reuse (73%) as a critical weakness. This configuration enables credential stuffing attacks to cascade from compromised email accounts into our system. Current monitoring cannot distinguish legitimate from malicious reset patterns, creating a detection gap. We assess this as HIGH risk due to the combination of high likelihood (given prevalent credential stuffing) and severe impact (mass account compromise). Immediate recommendations include implementing rate limiting (5 attempts per hour) and enhanced monitoring for unusual reset patterns."
+        Example workflow:
+        1. First: Use create_section tool to document the analysis
+        2. Then: Write a text response that includes "CONCLUDE" followed by your synthesis
 
-        Use create_section to draft your complete risk assessment for the domain.
+        Example text response after tool use:
+        "I've documented our comprehensive analysis in the risk assessment section. 
 
-        You should also explicitly say CONCLUDE in text, to make sure you give up your turn after creating your section.
+        CONCLUDE: After thorough internal deliberation, I have identified [key findings]. Our analysis reveals [main insights]. We recommend [specific actions]."
+        Make sure to reiterate the content you put in the report for the coordinator here. 
+
+        For example, if you are asked to brainstorm something, the CONCLUDE section should have the brainstorming results in it to make sure the coordinator can see them.
+
+        Tools:
+        - read_current_document: Review the emerging risk assessment
+        - list_sections: See what risk domains have been analyzed
+        - create_section: Create ONE section to document your analysis (do not include CONCLUDE in the content)
+
+        WE ARE DEBUGGING RIGHT NOW, CONCLUDE AFTER ONE ROUND.
         """
+
 
         
         domain_specific_prompt = f"""{self._base_system_message}
@@ -182,6 +206,8 @@ class Expert:
             self._initialized = True
             logger.info(f"Initialized both lobes for Expert {self.name}")
         
+        self._internal_conversation = []
+
         if self.debug:
             print(f"\n🔄 Starting internal deliberation for Expert {self.name}")
             print(f"📋 Query: {state['query']}")
@@ -197,11 +223,21 @@ class Expert:
     
     async def _lobe1_respond(self, state: ExpertState) -> ExpertState:
         """Creative lobe responds"""
-        context = f"Previous discussion: {state.get('lobe2_response', '')}" if state.get("lobe2_response") else ""
+        # Build context for creative lobe
+        context = state.get("team_context", "")
+        
+        # Add internal deliberation history
+        for msg in self._internal_conversation:
+            context += f"\n--{msg['speaker']}{' (YOU)' if msg['speaker'].endswith('Creative') else ''}: {msg['content']}"
         
         response = await self._lobe1.respond(state["query"], context)
         
-        # Show the internal deliberation only if debug is enabled
+        # Add to internal conversation
+        self._internal_conversation.append({
+            "speaker": f"{self.name}_Creative", 
+            "content": response
+        })
+        
         if self.debug:
             print(f"\n🎨 Creative Lobe ({self.name}): {response}")
         logger.info(f"Lobe 1 (Creative) responded for Expert {self.name}")
@@ -214,15 +250,60 @@ class Expert:
         }
     
     async def _lobe2_respond(self, state: ExpertState) -> ExpertState:
-        """Reasoning lobe responds"""
-        context = f"Creative lobe said: {state.get('lobe1_response', '')}"
+        """Reasoning lobe responds - can speak after tool use"""
+        # Build context for reasoning lobe
+        context = state.get("team_context", "")
+        
+        # Add internal deliberation history
+        for msg in self._internal_conversation:
+            context += f"\n--{msg['speaker']}{' (YOU)' if msg['speaker'].endswith('VoReason') else ''}: {msg['content']}"
         
         response = await self._lobe2.respond(state["query"], context)
         
-        # Check for CONCLUDE: - mirrors AutoGen termination condition
-        concluded = "CONCLUDE:" in response
+        # Check if there was a tool call in the response
+        tool_used = "Tool" in response# and "result:" in response
         
-        # Show the internal deliberation only if debug is enabled
+        # If a tool was used, extract the result and add follow-up
+        if tool_used:
+            # Check if there's meaningful content after the tool result
+            lines = response.strip().split('\n')
+            tool_section_ended = False
+            follow_up_lines = []
+            
+            for line in lines:
+                if tool_section_ended:
+                    follow_up_lines.append(line)
+                elif line.strip() == "" and "Result:" in '\n'.join(lines[:lines.index(line)]):
+                    tool_section_ended = True
+            
+            follow_up_text = '\n'.join(follow_up_lines).strip()
+            
+            if len(follow_up_text) < 50:  # Not enough follow-up
+                # Add the tool response to conversation first
+                self._internal_conversation.append({
+                    "speaker": f"{self.name}_VoReason",
+                    "content": response
+                })
+                
+                # Now ask for analysis
+                analysis_context = context + f"\n--{self.name}_VoReason: {response}"
+                analysis_prompt = "Based on the tool result above, please provide your analysis and either continue the discussion or conclude with your findings."
+                
+                follow_up_response = await self._lobe2.respond(analysis_prompt, analysis_context)
+                response = f"{response}\n\n{follow_up_response}"
+                
+                # Don't add to conversation again, will be added below
+                self._internal_conversation.pop()  # Remove the duplicate
+        
+        # Add complete response to internal conversation
+        self._internal_conversation.append({
+            "speaker": f"{self.name}_VoReason",
+            "content": response
+        })
+        
+        # Check for CONCLUDE (without colon requirement)
+        concluded = "CONCLUDE" in response.upper()
+        
         if self.debug:
             if concluded:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
@@ -247,10 +328,17 @@ class Expert:
     
     def _should_continue_after_lobe2(self, state: ExpertState) -> str:
         """Decide next step after lobe2"""
-        if state.get("concluded", False) or "CONCLUDE:" in state.get("lobe2_response", ""):
+        if state.get("concluded", False):
             return "conclude"
+        
+        # Check for CONCLUDE in the actual response (case insensitive)
+        lobe2_response = state.get("lobe2_response", "")
+        if "CONCLUDE" in lobe2_response.upper():
+            return "conclude"
+        
         if state.get("iteration_count", 0) >= state.get("max_rounds", 3) * 2:
             return "conclude"
+        
         return "lobe1"
     
     async def _extract_conclusion(self, state: ExpertState) -> ExpertState:
@@ -262,39 +350,63 @@ class Expert:
         
         # Look for CONCLUDE: in lobe2 response
         lobe2_response = state.get("lobe2_response", "")
-        if "CONCLUDE:" in lobe2_response:
-            conclusion_start = lobe2_response.find("CONCLUDE:") + len("CONCLUDE:")
-            conclusion = lobe2_response[conclusion_start:].strip()
-            if self.debug:
-                print("✅ Found natural conclusion from Reasoning Lobe")
-        else:
-            # Force summary if max rounds reached
-            if self.debug:
-                print("⚠️  Max rounds reached, forcing summary from Voice of Reason")
-            logger.info(f"Max rounds reached, requesting summary from Voice of Reason")
-            summary_prompt = """You've reached the maximum deliberation rounds. 
-                        
-            Based on the entire discussion you've had with your creative counterpart, provide a final summary.
 
-            Start with "CONCLUDE: After extensive internal deliberation," and then:
-            1. Summarize the main ideas explored
-            2. Highlight key assessments made
-            3. Provide actionable insights despite not reaching a natural conclusion
-            4. Keep it professional and valuable for the end user"""
+        conclude_patterns = ["CONCLUDE:", "CONCLUDE\n", "CONCLUDE "]
+        conclusion_found = False
+
+        for pattern in conclude_patterns:
+            if pattern in lobe2_response.upper():
+                # Find the actual pattern in original case
+                idx = lobe2_response.upper().find(pattern)
+                conclusion_start = idx + len(pattern)
+                conclusion = lobe2_response[conclusion_start:].strip()
+                conclusion_found = True
+                if self.debug:
+                    print("✅ Found natural conclusion from Reasoning Lobe")
+                break
+
+        if not conclusion_found:
+            if self.debug:
+                print("⚠️  Max rounds reached and no clear conclusion, forcing summary")
             
-            summary_response = await self._lobe2.respond(summary_prompt, "")
+            # Build full context of the deliberation
+            full_context = "Internal deliberation summary:\n"
+            for msg in self._internal_conversation:  # Last 6 messages
+                full_context += f"\n{msg['speaker']}: {msg['content']}"
+            
+            summary_prompt = f"""Based on the internal deliberation above, provide the expert's final conclusion.
+
+    Start with "CONCLUDE: " and then provide:
+    1. Key findings from the deliberation
+    2. Main risks or recommendations identified
+    3. Actionable next steps
+
+    Keep it professional and focused on the specific task requested."""
+            
+            summary_response = await self._lobe2.respond(summary_prompt, full_context)
+            
             if self.debug:
                 print(f"\n🧠 Reasoning Lobe (Forced Summary): {summary_response}")
             
-            if "CONCLUDE:" in summary_response:
-                conclusion_start = summary_response.find("CONCLUDE:") + len("CONCLUDE:")
-                conclusion = summary_response[conclusion_start:].strip()
+            # Extract from the summary response
+            for pattern in conclude_patterns:
+                if pattern in summary_response.upper():
+                    idx = summary_response.upper().find(pattern)
+                    conclusion_start = idx + len(pattern)
+                    conclusion = summary_response[conclusion_start:].strip()
+                    break
             else:
-                conclusion = "Unable to complete the analysis at this time."
+                # Fallback: use the entire summary response
+                conclusion = summary_response
+        
+        # Ensure we have a conclusion
+        if not conclusion or conclusion == "Unable to complete the analysis at this time.":
+            conclusion = f"After internal deliberation on '{state['query']}', {lobe2_response[-500:]}"  # Use last 500 chars
         
         if self.debug:
             print("=" * 60)
             print(f"🏁 Final Expert Response: {conclusion}")
+        
         logger.info(f"Expert {self.name} completed deliberation")
         
         return {
@@ -302,17 +414,21 @@ class Expert:
             "final_conclusion": conclusion,
             "concluded": True
         }
-    
-    async def process_message(self, query: str) -> str:
-        """Process a message using current LangGraph API"""
+        
+    async def process_message(self, query: str, team_context: str = "") -> str:
+        """Process a message with team conversation context"""
         if self.debug:
-            print(f"\n🚀 Expert {self.name} received message: '{query}'")
+            print(f"\n🚀 Expert {self.name} received message")
         logger.info(f"Expert {self.name} received a message")
         
-        # Create initial state using current pattern
+        # Store team context for lobes to access
+        self._team_conversation_context = team_context
+        
+        # Create initial state
         initial_state: ExpertState = {
             "messages": [],
-            "query": query,
+            "query": query,  # This is the current instruction
+            "team_context": team_context,  # Full conversation history
             "lobe1_response": "",
             "lobe2_response": "",
             "final_conclusion": "",
@@ -323,7 +439,7 @@ class Expert:
         }
         
         try:
-            # Run internal deliberation graph using current API
+            # Run internal deliberation
             logger.info(f"Starting internal deliberation for Expert {self.name}")
             final_state = await self._internal_graph.ainvoke(initial_state)
             
@@ -334,14 +450,7 @@ class Expert:
             
         except Exception as e:
             logger.error(f"Error in Expert {self.name} deliberation: {str(e)}", exc_info=True)
-            error_msg = (
-                f"I encountered an error during internal deliberation. "
-                f"Let me provide a direct response instead: Based on the query about "
-                f"'{query}', I need more specific information to provide a detailed answer."
-            )
-            if self.debug:
-                print(f"\n❌ Error in Expert {self.name}: {error_msg}")
-            return error_msg
+            return f"I encountered an error during internal deliberation."
     
     async def update_keywords(self, lobe1_keywords: List[str] = None, lobe2_keywords: List[str] = None):
         """Update keywords for lobes"""
