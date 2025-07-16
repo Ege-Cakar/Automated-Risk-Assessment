@@ -3,6 +3,9 @@ from langchain_openai import ChatOpenAI
 from src.utils.schemas import TeamState
 from src.utils.system_prompts import SUMMARIZER_PROMPT
 from src.utils.report import read_current_document, create_section
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SummaryAgent:
     """
@@ -19,7 +22,7 @@ class SummaryAgent:
         """Generate final summary report"""
         
         if self.debug:
-            print(f"\n📊 Summary Agent generating final report...")
+            logger.info(f"\n📊 Summary Agent generating final report...")
         
         # Collect all expert responses
         expert_contributions = ""
@@ -50,7 +53,7 @@ Create the comprehensive final section that synthesizes all expert input. To tha
             summary = response.content.strip()
             
             if self.debug:
-                print(f"✅ Summary Agent completed report ({len(summary)} chars)")
+                logger.info(f"✅ Summary Agent completed report ({len(summary)} chars)")
             
             return summary
             

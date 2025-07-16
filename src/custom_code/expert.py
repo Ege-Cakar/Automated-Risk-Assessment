@@ -120,6 +120,7 @@ class Expert:
         - STRUCTURED with clear headings and organization
         - SPECIFIC with concrete examples and scenarios
         - ACTIONABLE with clear risk chains and implications
+        - SYSTEMATIC with clear premises, inductions and conclusions!
 
         CRITICAL INSTRUCTION FOR CONCLUSIONS:
         When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your CONCLUDE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.

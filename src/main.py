@@ -62,13 +62,11 @@ async def main():
     
     # Create model client using current API
     model_client = ChatOpenAI(
-        model="gpt-4.1",
-        temperature=0.7
+        model="o4-mini"
     )
 
     thinking_client = ChatOpenAI(
-        model="o4-mini",
-        temperature=0.7
+        model="o4-mini"
     )
     
 

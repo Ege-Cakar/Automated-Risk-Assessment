@@ -100,6 +100,8 @@ Available tools:
 - read_current_document: See the emerging narrative
 - merge_section: Integrate strong contributions
 
+
+
 Remember: You're building a defensible, comprehensive risk assessment that will stand up to scrutiny."""
 
 
