@@ -87,11 +87,11 @@ async def main():
         
         # Create model client using current API
         model_client = ChatOpenAI(
-            model="o4-mini"
+            model="o3"
         )
 
         thinking_client = ChatOpenAI(
-            model="o4-mini"
+            model="o3"
         )
     
     if generate_new_experts:
@@ -110,7 +110,7 @@ async def main():
         """
 
         expert_generator = ExpertGenerator(
-            model="o4-mini",
+            model="o3",
             provider="openai",
             min_experts=5,
             max_experts=12
@@ -146,7 +146,7 @@ async def main():
             return
         
         # Create model client without tools binding for direct summary
-        model_client = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+        model_client = ChatOpenAI(model="o3")
         
         # Build content from saved sections
         messages = []

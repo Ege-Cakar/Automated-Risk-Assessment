@@ -2,7 +2,7 @@ from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 from src.utils.schemas import TeamState
 from src.utils.system_prompts import SUMMARIZER_PROMPT
-from src.utils.report import read_current_document, create_section
+from src.utils.report import read_current_document, create_section, merge_section
 from langchain_google_genai import ChatGoogleGenerativeAI
 import logging
 
@@ -14,7 +14,7 @@ class SummaryAgent:
     """
     
     def __init__(self, model_client: ChatGoogleGenerativeAI or ChatOpenAI, debug: bool = False):
-        self.model_client = model_client.bind_tools([create_section, read_current_document])
+        self.model_client = model_client.bind_tools([create_section, read_current_document, merge_section])
         self.debug = debug
         
         self.system_message = SUMMARIZER_PROMPT
@@ -42,7 +42,7 @@ Expert Contributions:
 Full Conversation Log:
 {conversation_log}
 
-Create the comprehensive final section that synthesizes all expert input. To that end, be sure to read all existing sections with read_current_document. Create a new section called "Final Summary" and write the summary there using create_section.
+Create the comprehensive final section that synthesizes all expert input and their arguments.
 
 Make sure all details and arguments are preserved. Be comprehensive. Be specific. And be clear in your arguments.
 

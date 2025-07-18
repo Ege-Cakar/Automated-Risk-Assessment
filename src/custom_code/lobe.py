@@ -22,11 +22,12 @@ class Lobe:
         self.name = name
         
         # Create a new model client with specified temperature
-        self.model_client = ChatOpenAI(
-            model=model_client.model_name,
-            temperature=temperature,
-            api_key=model_client.openai_api_key if hasattr(model_client, 'openai_api_key') else None
-        )
+        # self.model_client = ChatOpenAI(
+        #     model=model_client.model_name,
+        #     temperature=temperature,
+        #     api_key=model_client.openai_api_key if hasattr(model_client, 'openai_api_key') else None
+        # )
+        self.model_client = model_client
         
         self.vector_memory = vector_memory
         self.keywords = keywords or []
