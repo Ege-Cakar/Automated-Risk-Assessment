@@ -42,7 +42,8 @@ class DocumentManager:
         self.base_path = base_path
         self.sections: Dict[str, Section] = {}
         self.history: List[DocumentChange] = []
-        self.current_document: Dict[str, str] = {}  # section_id -> content
+        self.current_document: List[Tuple[str, str, int]] = []  
+
 
         # Create directory if it doesn't exist
         Path(self.base_path).mkdir(parents=True, exist_ok=True)
@@ -52,6 +53,7 @@ class DocumentManager:
         
     def create_section(self, domain: str, author: str, content: str) -> str:
         """Create a new draft section"""
+        content = content.rstrip() + "\n"
         section_id = f"{domain}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
         section = Section(
             section_id=section_id,
@@ -78,6 +80,7 @@ class DocumentManager:
         """Propose an edit to existing section (creates new version)"""
         if section_id not in self.sections:
             raise ValueError(f"Section {section_id} not found")
+        new_content = new_content.rstrip() + "\n"
             
         original = self.sections[section_id]
         new_version_id = f"{original.domain}_v{original.version + 1}_{datetime.now().strftime('%H%M%S')}"
@@ -112,10 +115,15 @@ class DocumentManager:
             return False
             
         section = self.sections[section_id]
+
+        if section.version <= self._latest_version(section.domain):
+            raise ValueError(f"Cannot merge older version {section.version} "
+                             f"after v{self._latest_version(section.domain)}")  
+
         section.status = SectionStatus.MERGED
         section.updated_at = datetime.now()
         
-        self.current_document[section.domain] = section.content
+        self.current_document.append((section.domain, section_id, section.version))
         
         change = DocumentChange(
             change_id=uuid.uuid4().hex,
@@ -131,16 +139,25 @@ class DocumentManager:
         return True
     
     def get_current_document_markdown(self) -> str:
-        """Generate clean markdown from current document state"""
-        md_parts = ["# Risk Assessment Report\n"]
-        md_parts.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        for domain, content in sorted(self.current_document.items()):
-            md_parts.append(f"## {domain.replace('_', ' ').title()}\n\n")
-            md_parts.append(content)
-            md_parts.append("\n\n")
-            
-        return "".join(md_parts)
+        parts = [
+            "# Risk Assessment Report\n",
+            f"_Generated {datetime.now():%Y-%m-%d %H:%M:%S}_\n\n"
+        ]
+        for domain, sid, ver in self.current_document:
+            sec = self.sections[sid]
+            parts.extend([
+                f"## {domain.replace('_', ' ').title()}  \n",
+                f"*Version {ver} • Author: {sec.author} • Section ID: {sid}*\n\n",
+                sec.content.rstrip(),  # strip dangling whitespace
+                "\n\n",
+            ])
+        return "".join(parts)
+
+    def _latest_version(self, domain: str) -> int:
+        for dom, _, ver in reversed(self.current_document):
+            if dom == domain:
+                return ver
+        return 0
     
     def _section_to_dict(self, section: Section) -> Dict[str, Any]:
         """Convert Section to dictionary for JSON serialization"""

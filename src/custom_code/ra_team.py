@@ -33,8 +33,8 @@ class ExpertTeam:
         coordinator: Coordinator,
         experts: Dict[str, Any],  # Expert instances
         summary_agent: SummaryAgent,
-        max_messages: int = 20,
-        recursion_limit: int = 75,
+        max_messages: int = 40,
+        recursion_limit: int = 125,
         debug: bool = False,
         conversation_path: str = "conversation.json"
     ):

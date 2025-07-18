@@ -267,7 +267,7 @@ async def main():
             coordinator=coordinator,
             experts=experts,
             summary_agent=summary_agent,
-            max_messages=30,
+            max_messages=40,
             debug=DEBUG_INTERNAL_DELIBERATION,
             conversation_path="data/conversations",
         )

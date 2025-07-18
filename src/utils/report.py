@@ -92,6 +92,9 @@ def merge_section(
 ) -> str:
     """Merge an approved section into the main document (Coordinator only)"""
     manager = get_doc_manager()
-    if manager.merge_to_document(section_id, notes):
-        return f"Successfully merged section {section_id} into main document"
-    return f"Failed to merge section {section_id}"
+    try:
+        if manager.merge_to_document(section_id, notes):
+            return f"Successfully merged section {section_id} into main document"
+        return f"Failed to merge section {section_id}"
+    except Exception as exc:
+        return f"Failed to merge section {section_id}: {exc}"

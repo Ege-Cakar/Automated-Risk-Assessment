@@ -1,280 +1,270 @@
-from typing import Dict, Any, List
-from langchain_openai import ChatOpenAI
-from src.utils.schemas import TeamState
-from src.utils.system_prompts import SWIFT_COORDINATOR_PROMPT
+from __future__ import annotations
+
 import json
 import logging
-from src.utils.report import read_current_document, list_sections, merge_section
+from typing import Dict, Any, List
+
+from langchain_openai import ChatOpenAI
+from src.utils.schemas import TeamState
+from src.utils.report import (
+    read_current_document,
+    list_sections,
+    merge_section,
+)
+from src.utils.system_prompts import SWIFT_COORDINATOR_PROMPT
 
 logger = logging.getLogger(__name__)
+
 
 class Coordinator:
     """
     Central coordinator that manages expert selection and conversation flow.
-    Acts as the hub in hub-and-spoke architecture.
     """
-    
+
     def __init__(
         self,
         model_client: ChatOpenAI,
-        experts: Dict[str, Any],  # Will be Expert instances
+        experts: Dict[str, Any],
         debug: bool = False,
-        tools: List[Any] = None,
-        swift_info: str = ""
+        tools: List[Any] | None = None,
+        swift_info: str = "",
     ):
-        self.base_model_client = model_client
         self.experts = experts
         self.debug = debug
-        self.tools = tools or [read_current_document, list_sections, merge_section]
-        self.system_message = SWIFT_COORDINATOR_PROMPT
         self.swift_info = swift_info
 
-        # Bind tools to create a new model client
+        self.tools = tools or [read_current_document, list_sections, merge_section]
+        # A tool-bound model for direct calls
         self.model_client = model_client.bind_tools(self.tools)
-    
+
+        # running counters
+        self.turn_counter: int = 0          # every call to decide_next_action increments
+        self.last_merge_turn: int = -1      # turn# when we last performed QC
+
+        # store the raw system prompt (template)
+        self._system_template = SWIFT_COORDINATOR_PROMPT
+
+    # --------------------------------------------------------------------- #
+    #  Main public API
+    # --------------------------------------------------------------------- #
     async def decide_next_action(self, state: TeamState) -> Dict[str, Any]:
-        """Coordinator decides the next action"""
-        
+        """
+        Main driver called by ExpertTeam.
+        Returns a JSON-serialisable dict with keys:
+          reasoning · decision · keywords · instructions
+        """
+        self.turn_counter += 1
         if self.debug:
-            print(f"\n🎯 Coordinator analyzing conversation (Message {state['message_count']}/{state['max_messages']})")
-        
-        # Check message limit
+            print(
+                f"\n🎯 Coordinator analysing (turn {self.turn_counter} | "
+                f"msg {state['message_count']}/{state['max_messages']})"
+            )
+
+        # ------------------------------------------------------------------
+        #  0. Hard stop on message limit
+        # ------------------------------------------------------------------
         if state["message_count"] >= state["max_messages"]:
             if self.debug:
-                print("⏰ Message limit reached - forcing summarize")
+                print("⏰ Message cap hit – forcing summarise")
             return {
-                "reasoning": "Message limit reached",
-                "decision": "summarize", 
-                "keywords": ["summary", "conclusion"],
-                "instructions": "Create final comprehensive summary of the risk assessment according to your instructions."
+                "reasoning": "Message cap reached – handing off for summary.",
+                "decision": "summarize",
+                "keywords": ["summary"],
+                "instructions": "Create the final comprehensive report.",
             }
-        
-        # Build conversation context
-        conversation_summary = ""
-        if state["messages"]:
-            conversation_summary = "\n".join([
-                f"{msg['speaker']}: {msg['content']}"
-                for msg in state["messages"][-20:]
-            ])
-        
-        expert_status = ""
-        for expert_name in self.experts.keys():
-            contribution_count = sum(1 for msg in state["messages"] if msg["speaker"] == expert_name)
-            status = f"Contributed {contribution_count} time(s)" if contribution_count > 0 else "Not consulted"
-            expert_status += f"- {expert_name}: {status}\n"
-        
-        prompt = f"""Original Query: {state['query']}
 
-    Current Keywords: {state.get('conversation_keywords', [])}
+        # ------------------------------------------------------------------
+        #  1. Every other coordinator turn → QC / merge draft sections
+        # ------------------------------------------------------------------
+        if (
+            self.turn_counter % 2 == 0
+            and self.last_merge_turn != self.turn_counter
+        ):
+            merge_reasoning = await self._perform_qc_merge()
+            self.last_merge_turn = self.turn_counter
+            # Stay in coordinator after merging
+            return {
+                "reasoning": merge_reasoning,
+                "decision": "continue_coordinator",
+            }
 
-    Expert Status:
-    {expert_status}
+        # ------------------------------------------------------------------
+        #  2. Normal “figure out who speaks next” flow
+        # ------------------------------------------------------------------
+        decision_dict = await self._ask_model_for_next_step(state)
 
-    Recent Conversation:
-    {conversation_summary}
+        if self.debug:
+            print(f"🧠 Decision: {decision_dict['decision']}")
+            print(f"💭 Reasoning: {decision_dict['reasoning']}")
+            if decision_dict.get("keywords"):
+                print(f"🔑 Keywords: {decision_dict['keywords']}")
 
-    Available Experts: {list(self.experts.keys())}
+        return decision_dict
 
-    You may use the available tools (read_current_document, list_sections, merge_section) to review progress.
-    Remember: You CANNOT create content - only direct experts to create it.
-
-    What content needs to be created next? Which expert should create it?
-
-    Your response must be valid JSON only."""
-        
-        # Format system message with expert list
-        formatted_system = self.system_message.format(
-            expert_list=", ".join(self.experts.keys()),
-            swift_info=self.swift_info
-        )
-        
-        # DEFINE messages HERE - this was missing!
-        messages = [
-            {"role": "system", "content": formatted_system},
-            {"role": "user", "content": prompt}
-        ]
-        
+    # ===================================================================== #
+    #  Internal helpers
+    # ===================================================================== #
+    async def _perform_qc_merge(self) -> str:
+        """
+        List all sections and automatically merge any still in *draft* status.
+        Returns a multi-line reasoning string.
+        """
+        reasoning_lines: List[str] = []
         try:
-            # First invocation - might include tool calls
-            response = await self.model_client.ainvoke(messages)
-            
-            # Handle tool calls if present
-            if hasattr(response, 'tool_calls') and response.tool_calls:
-                # Execute each tool call
-                tool_messages = messages.copy()
-                tool_messages.append(response)  # Add AI message with tool calls
-                
-                for tool_call in response.tool_calls:
-                    tool_func = None
-                    for tool in self.tools:
-                        if tool.name == tool_call['name']:
-                            tool_func = tool
-                            break
-                    
-                    if tool_func:
-                        try:
-                            # Execute the tool
-                            result = await tool_func.ainvoke(tool_call['args'])
-                            
-                            # Better formatted debug output
-                            if self.debug:
-                                result_preview = str(result)
-                                if len(result_preview) > 200:
-                                    result_preview = result_preview[:200] + "..."
-                                print(f"🔧 Coordinator used {tool_call['name']}")
-                                if tool_call.get('args'):
-                                    print(f"   Args: {tool_call['args']}")
-                                print(f"   Result: {result_preview}")
-                            
-                            # Add tool result to messages
-                            tool_messages.append({
-                                "role": "tool",
-                                "content": str(result),
-                                "tool_call_id": tool_call['id']
-                            })
-                        except Exception as e:
-                            if self.debug:
-                                print(f"❌ Coordinator tool error: {e}")
-                            tool_messages.append({
-                                "role": "tool",
-                                "content": f"Error: {str(e)}",
-                                "tool_call_id": tool_call['id']
-                            })
-                
-                # Ask for the decision after tool use with clearer instructions
-                tool_messages.append({
-                    "role": "user",
-                    "content": """Based on the tool results above, provide your decision in JSON format.
+            raw = await list_sections.ainvoke({})
+            sections = json.loads(raw) if raw else []
+        except Exception as exc:
+            return f"Attempted QC but list_sections failed: {exc}"
 
-    You MUST respond with valid JSON containing these fields:
-    {{
-        "reasoning": "Your analysis of what you learned from the tools and what should happen next",
-        "decision": "continue_coordinator" OR "expert_name" OR "summarize",
-        "keywords": ["relevant", "keywords", "here"],  // required if handing off to expert
-        "instructions": "Clear instructions for the expert"  // required if handing off to expert
-    }}
+        drafts = [s for s in sections if s.get("status") == "draft"]
 
-    Example responses:
-    - To continue coordinating: {{"reasoning": "I need to merge the approved sections", "decision": "continue_coordinator"}}
-    - To hand off: {{"reasoning": "We need guide words created", "decision": "Fire Safety Systems Expert", "keywords": ["guide", "words", "swift"], "instructions": "Please create a comprehensive guide word list for the SWIFT assessment"}}
-    - To summarize: {{"reasoning": "All experts have contributed", "decision": "summarize", "keywords": ["summary"], "instructions": "Create final report"}}
+        if not drafts:
+            return "QC pass: no draft sections to merge."
 
-    RESPOND ONLY WITH JSON."""
-                })
-                
-                # Get the final decision with retry logic
-                max_retries = 3
-                for retry in range(max_retries):
-                    try:
-                        follow_up = await self.model_client.ainvoke(tool_messages)
-                        
-                        if not follow_up.content:
-                            if retry < max_retries - 1:
-                                if self.debug:
-                                    print(f"⚠️  Empty response from coordinator, retry {retry + 1}/{max_retries}")
-                                continue
-                            else:
-                                raise ValueError("No content in follow-up response after retries")
-                        
-                        # Extract JSON from the follow-up response
-                        content = follow_up.content.strip()
-                        json_start = content.find('{')
-                        json_end = content.rfind('}') + 1
-                        
-                        if json_start != -1 and json_end > json_start:
-                            json_content = content[json_start:json_end]
-                            decision_data = json.loads(json_content)
-                            break  # Success, exit retry loop
-                        else:
-                            decision_data = json.loads(content)
-                            break
-                            
-                    except json.JSONDecodeError as e:
-                        if retry < max_retries - 1:
-                            if self.debug:
-                                print(f"⚠️  JSON parse error, retry {retry + 1}/{max_retries}: {e}")
-                            continue
-                        else:
-                            raise
-            else:
-                # No tool calls, parse JSON response normally
-                content = response.content.strip()
-                
-                # Try to find JSON in the response
-                json_start = content.find('{')
-                json_end = content.rfind('}') + 1
-                
-                if json_start != -1 and json_end > json_start:
-                    json_content = content[json_start:json_end]
-                    decision_data = json.loads(json_content)
-                else:
-                    decision_data = json.loads(content)
-            
-            # Validate and fix decision_data
-            if decision_data.get("decision") == "continue_coordinator":
-                # For continuation, we don't need keywords or instructions
-                if "reasoning" not in decision_data:
-                    decision_data["reasoning"] = "Continuing coordinator analysis"
-            else:
-                # For expert handoff or summary, ensure all fields
-                if "keywords" not in decision_data:
-                    decision_data["keywords"] = state.get("conversation_keywords", [])
-                if "instructions" not in decision_data:
-                    if decision_data["decision"] == "summarize":
-                        decision_data["instructions"] = "Create final comprehensive summary"
-                    else:
-                        # Better default instructions based on conversation state
-                        try:
-                            sections = await list_sections.ainvoke({})
-                            if not sections or sections == "[]":
-                                decision_data["instructions"] = "Please create the initial guide word list for our SWIFT assessment following Step 1 of the methodology"
-                            else:
-                                decision_data["instructions"] = "Please analyze the risks in your domain and create appropriate content for the SWIFT assessment"
-                        except:
-                            decision_data["instructions"] = "Please analyze the query and create appropriate content for the risk assessment"
-            
-            if self.debug:
-                print(f"🧠 Coordinator Decision: {decision_data['decision']}")
-                print(f"💭 Reasoning: {decision_data['reasoning']}")
-                if decision_data.get('keywords'):
-                    print(f"🔑 Updated Keywords: {decision_data['keywords']}")
-            
-            return decision_data
-            
-        except Exception as e:
-            logger.error(f"Coordinator decision error: {e}")
-            
-            # Better fallback decision with context
-            sections_result = "[]"
+        for sec in drafts:
+            sid = sec["section_id"]
             try:
-                sections_result = await list_sections.ainvoke({})
-            except:
-                pass
-            
-            # Determine what stage we're at
-            if sections_result == "[]" or not sections_result:
-                # No sections yet, need to start with guide words
-                return {
-                    "reasoning": "No sections created yet - starting with guide word generation",
-                    "decision": "Regulatory Compliance & Standards Expert",
-                    "keywords": ["guide", "words", "swift", "hazard", "deviation"],
-                    "instructions": "Please create a comprehensive guide word list for the SWIFT assessment following Step 1 of the methodology"
+                merge_result = await merge_section.ainvoke(
+                    {"section_id": sid, "notes": f"Auto-merge on turn {self.turn_counter}"}
+                )
+                reasoning_lines.append(f"Merged {sid}: {merge_result}")
+            except Exception as exc:
+                reasoning_lines.append(f"⚠️ Merge {sid} failed: {exc}")
+
+        return "QC/merge completed:\n" + "\n".join(reasoning_lines)
+
+    # ------------------------------------------------------------------ #
+    async def _ask_model_for_next_step(self, state: TeamState) -> Dict[str, Any]:
+        """
+        Builds the conversation context, calls the LLM (with tools),
+        then parses / validates the returned JSON.
+        """
+        # ---- build conversation summary -------------------------------------------------
+        recent_conv = "\n".join(
+            f"{m['speaker']}: {m['content']}" for m in state["messages"][-20:]
+        )
+        expert_status = "\n".join(
+            f"- {name}: "
+            + ("Contributed" if name in state["expert_responses"] else "Not consulted")
+            for name in self.experts
+        )
+
+        user_prompt = f"""Original Query: {state['query']}
+
+Current Keywords: {state.get('conversation_keywords', [])}
+
+Expert Status:
+{expert_status}
+
+Recent Conversation:
+{recent_conv}
+
+Available Experts: {list(self.experts.keys())}
+
+You may use the tools (read_current_document, list_sections, merge_section) for QC.
+Remember: **You CANNOT create content** – only direct experts to create it.
+
+What content is needed next, and who should create it?
+
+Respond with valid JSON only.
+"""
+
+        system_msg = self._system_template.format(
+            expert_list=", ".join(self.experts.keys()),
+            swift_info=self.swift_info,
+        )
+
+        messages = [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # ---- first LLM call -------------------------------------------------------------
+        assistant = await self.model_client.ainvoke(messages)
+
+        # If the assistant invoked tools, execute them and get a follow-up
+        if getattr(assistant, "tool_calls", None):
+            follow_json = await self._handle_tool_phase(
+                messages, assistant, system_msg
+            )
+        else:
+            follow_json = self._safe_json_from_text(assistant.content)
+
+        # ---- sanity-fill missing fields -------------------------------------------------
+        follow_json.setdefault("keywords", state.get("conversation_keywords", []))
+        if follow_json["decision"] not in ("continue_coordinator", "summarize", "end"):
+            follow_json.setdefault(
+                "instructions",
+                "Please produce the requested content with clear argument chains.",
+            )
+
+        return follow_json
+
+    # ------------------------------------------------------------------ #
+    async def _handle_tool_phase(
+        self, base_msgs: List[dict], assistant_msg, system_msg: str
+    ) -> Dict[str, Any]:
+        """
+        Execute each tool call and then ask the model for its JSON decision.
+        Uses **all-dict** messages to stay homogeneous.
+        """
+        tool_msgs: List[dict] = base_msgs[:]  # shallow copy (all dicts)
+        # Append assistant call as dict
+        tool_msgs.append(
+            {
+                "role": "assistant",
+                "content": assistant_msg.content,
+                "tool_calls": assistant_msg.tool_calls,
+            }
+        )
+
+        # Execute each tool
+        for tc in assistant_msg.tool_calls:
+            tool_fn = next((t for t in self.tools if t.name == tc["name"]), None)
+            if not tool_fn:
+                tool_msgs.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": f"Error: tool {tc['name']} not found",
+                    }
+                )
+                continue
+            try:
+                result = await tool_fn.ainvoke(tc["args"])
+            except Exception as exc:
+                result = f"Error executing tool: {exc}"
+            tool_msgs.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": str(result),
                 }
-            else:
-                # We have some sections, continue with next expert
-                if len(state["expert_responses"]) < len(self.experts):
-                    unused_experts = [name for name in self.experts.keys() 
-                                    if name not in state["expert_responses"]]
-                    return {
-                        "reasoning": f"Error recovery - consulting next expert ({e})",
-                        "decision": unused_experts[0],
-                        "keywords": state.get("conversation_keywords", ["risk", "assessment", "hazard"]),
-                        "instructions": "Please analyze the risks in your domain and contribute to the SWIFT assessment"
-                    }
-                else:
-                    return {
-                        "reasoning": "Error recovery - ready to summarize",
-                        "decision": "summarize",
-                        "keywords": ["summary"],
-                        "instructions": "Create final summary"
-                    }
+            )
+
+        # Ask for final JSON decision
+        follow_prompt = (
+            "Based on the tool results above, provide your decision in **JSON only** "
+            "with keys: reasoning · decision · keywords · instructions."
+        )
+        tool_msgs.append({"role": "user", "content": follow_prompt})
+
+        follow = await self.model_client.ainvoke(tool_msgs)
+        return self._safe_json_from_text(follow.content)
+
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _safe_json_from_text(txt: str) -> Dict[str, Any]:
+        """
+        Extract first {...} block or fall back to whole string.
+        Raises on failure so upstream fallback logic can trigger.
+        """
+        if not txt:
+            raise ValueError("LLM returned empty content")
+
+        start = txt.find("{")
+        end = txt.rfind("}") + 1
+        try:
+            return json.loads(txt[start:end] if start != -1 else txt)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Could not parse JSON: {exc}\n---RAW---\n{txt}\n---") from exc

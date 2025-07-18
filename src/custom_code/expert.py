@@ -21,7 +21,8 @@ class Expert:
         system_message: str = None,
         lobe1_config: Dict[str, Any] = None,
         lobe2_config: Dict[str, Any] = None,
-        max_rounds: int = 3,
+        lobe3_config: Dict[str, Any] = None,
+        max_rounds: int = 4,
         description: str = "An expert agent that internally deliberates using two specialized lobes.",
         debug: bool = False,  # Toggleable debug output
         **kwargs
@@ -45,9 +46,11 @@ class Expert:
         # Default configurations - same prompts as AutoGen
         lobe1_config = lobe1_config or {}
         lobe2_config = lobe2_config or {}
+        lobe3_config = lobe3_config or {}
 
         lobe1_tools = lobe1_config.get('tools', []) + [read_current_document, list_sections]
         lobe2_tools = lobe2_config.get('tools', []) + [create_section]
+        lobe3_tools = lobe3_config.get('tools', []) + []
 
         lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
 
@@ -96,24 +99,37 @@ class Expert:
         SYNTHESIS REQUIREMENTS:
         When ready to conclude (after thorough deliberation):
         1. Use create_section ONCE with the FULL collaborative analysis
-        2. Write "RESPONSE:" followed by the COMPLETE deliverables
+        2. Write "CONCLUDED" to let the summarizer lobe, who will take over from there, know that you are finished
         3. Include ALL content requested (actual keywords, scenarios, etc.)
         4. Present clear argument chains for each item
 
-        Example conclusion format:
+        Remember: The coordinator needs the ACTUAL deliverables with full reasoning. Also remember to always include CONCLUDED in the final response. 
 
-        RESPONSE: Based on my analysis, here are the comprehensive keywords for authentication risk assessment:
-
-        BYPASS - Premise: Authentication is only as strong as its weakest recovery mechanism. Inference: Attackers will target password reset flows. Conclusion: Critical vulnerability in account recovery.
-        SPOOF - Premise: Users rely on visual cues for legitimacy. Inference: Sophisticated phishing can replicate these cues. Conclusion: High risk of credential harvesting.
-        [... complete list with full argumentative support ...]
-
-        Remember: The coordinator needs the ACTUAL deliverables with full reasoning, not summaries. Also remember to always start the final response with RESPONSE:. 
+        IF YOU DON'T INCLUDE CONCLUDED IN YOUR FINAL RESPONSE, THEN THE COORDINATOR WILL NOT SEE YOUR FINAL RESPONSE AND WILL NOT BE ABLE TO USE IT. YOU WILL BE MESSING THINGS UP!
 
         Tools:
         - read_current_document: Review context
         - list_sections: Check existing work
         - create_section: Document FINAL synthesized analysis"""
+
+
+        lobe3_general = """
+
+        You are the Summarizer.
+
+        • You read the *entire* internal deliberation that has already reached the
+        CONCLUDED signal that was given to you.
+
+        • Your only goal is to turn the material you see into a cohesive, polished response from the voice of one expert, in first person. 
+        – Preserve all factual / argumentative content.  
+        – Fix ordering, markdown, headings, spacing.  
+        – Speak in **first-person singular** (“I …”).  
+        – Do NOT add new analysis or reopen discussion.
+
+        Return ONLY the polished text that should be shown to the coordinator, who you are responding to –
+        no commentary, no wrappers.
+
+        """
 
         
         domain_specific_prompt = f"""{self._base_system_message}
@@ -126,11 +142,12 @@ class Expert:
         - Provide specific, actionable recommendations
         - Use clear reasoning to justify risk ratings and priorities
 
-        Write your assessment as a professional risk analysis - thorough, well-reasoned, and focused on helping the organization understand and address real vulnerabilities.
+        Write your assessment as a professional - thorough, well-reasoned, and focused on helping the organization understand and address real vulnerabilities.
         """
         
         lobe1_full_message = f"{domain_specific_prompt}\n\n{lobe1_general}"
         lobe2_full_message = f"{domain_specific_prompt}\n\n{lobe2_general}"
+        lobe3_full_message = f"{lobe3_general}"
         
         # Create lobes using current APIs
         self._lobe1 = Lobe(
@@ -152,6 +169,14 @@ class Expert:
             system_message=lobe2_full_message,
             tools=lobe2_tools
         )
+
+        self._lobe3 = Lobe(
+            name=f"{name}_Reporter",
+            model_client=model_client,
+            vector_memory=vector_memory,
+            system_message=lobe3_full_message,
+            tools=lobe3_tools
+        )
         
         # Build the internal deliberation graph using current LangGraph patterns
         self._internal_graph = self._build_internal_graph()
@@ -165,6 +190,8 @@ class Expert:
         workflow.add_node("lobe1_respond", self._lobe1_respond)
         workflow.add_node("lobe2_respond", self._lobe2_respond)
         workflow.add_node("extract_conclusion", self._extract_conclusion)
+        workflow.add_node("lobe3_respond", self._lobe3_respond)
+
         
         # Set entry point using current API
         workflow.add_edge(START, "initialize")
@@ -187,7 +214,9 @@ class Expert:
                 "conclude": "extract_conclusion"
             }
         )
-        workflow.add_edge("extract_conclusion", END)
+
+        workflow.add_edge("extract_conclusion", "lobe3_respond")
+        workflow.add_edge("lobe3_respond", END)
         
         return workflow.compile()
     
@@ -320,108 +349,53 @@ class Expert:
         return "lobe2"
     
     def _should_continue_after_lobe2(self, state: ExpertState) -> str:
-        """Decide next step after lobe2"""
-        if state.get("concluded", False):
-            return "conclude"
-        
-        # Check for RESPONSE in the actual response (case insensitive)
         lobe2_response = state.get("lobe2_response", "")
-        if "RESPONSE" in lobe2_response.upper():
+
+        # ───── early-exit hooks ─────
+        done = (
+            "CONCLUDED" in lobe2_response.upper()              # plain token
+            or "CONCLUDE" in lobe2_response.upper()
+            or "CONCLUDE:" in lobe2_response.upper()  
+            or "CONCLUDE\n" in lobe2_response.upper()
+            or "CONCLUDE " in lobe2_response.upper()
+            or "CONCLUDE." in lobe2_response.upper()
+        )
+        if done:
             return "conclude"
-        
+        # ────────────────────────────────
+
         if state.get("iteration_count", 0) >= state.get("max_rounds", 3) * 2:
             return "conclude"
-        
         return "lobe1"
     
     async def _extract_conclusion(self, state: ExpertState) -> ExpertState:
-        """Extract final conclusion"""
-        conclusion = ""
-        
-        if self.debug:
-            print(f"\n🎯 Extracting final conclusion for Expert {self.name}")
-        
-        # Look for RESPONSE: in lobe2 response
-        lobe2_response = state.get("lobe2_response", "")
-
-        conclude_patterns = ["RESPONSE:", "RESPONSE\n", "RESPONSE "]
-        conclusion_found = False
-
-        for pattern in conclude_patterns:
-            if pattern in lobe2_response.upper():
-                # Find the actual pattern in original case
-                idx = lobe2_response.upper().find(pattern)
-                conclusion_start = idx + len(pattern)
-                conclusion = lobe2_response[conclusion_start:].strip()
-                conclusion_found = True
-                if self.debug:
-                    print("✅ Found natural conclusion from Reasoning Lobe")
-                break
-
-        if not conclusion_found:
-            if self.debug:
-                print("⚠️  Max rounds reached and no clear conclusion, forcing summary")
-            
-            # Build full context of the deliberation
-            full_context = "Internal deliberation summary:\n"
-            for msg in self._internal_conversation:  # Last 6 messages
-                full_context += f"\n{msg['speaker']}: {msg['content']}"
-            
-            summary_prompt = f"""Based on the internal deliberation above, provide the expert's final conclusion.
-
-        1. Use create_section to document the FULL collaborative analysis
-        2. Write "RESPONSE:" followed by the COMPLETE deliverables
-
-        Your analysis should be:
-        - DETAILED and COMPREHENSIVE - don't just summarize, provide full analysis
-        - STRUCTURED with clear headings and organization
-        - SPECIFIC with concrete examples and scenarios
-        - ACTIONABLE with clear risk chains and implications
-        - SYSTEMATIC with clear premises, inductions and conclusions!
-
-        CRITICAL INSTRUCTION FOR RESPONSES:
-        When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your RESPONSE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.
-
-        BAD Example (DON'T DO THIS):
-        "RESPONSE: I have identified comprehensive guide words that cover all aspects..."
-
-        GOOD Example (DO THIS):
-        "RESPONSE: Here are the comprehensive guide words for MFA risk assessment:
-
-        [... all the actual guide words ...]"
-
-        Do not forget that you are conversing argumentatively with the coordinator.
-"""
-            
-            summary_response = await self._lobe2.respond(summary_prompt, full_context)
-            
-            if self.debug:
-                print(f"\n🧠 Reasoning Lobe (Forced Summary): {summary_response}")
-            
-            # Extract from the summary response
-            for pattern in conclude_patterns:
-                if pattern in summary_response.upper():
-                    idx = summary_response.upper().find(pattern)
-                    conclusion_start = idx + len(pattern)
-                    conclusion = summary_response[conclusion_start:].strip()
-                    break
-            else:
-                # Fallback: use the entire summary response
-                conclusion = summary_response
-        
-        # Ensure we have a conclusion
-        if not conclusion or conclusion == "Unable to complete the analysis at this time.":
-            conclusion = f"After internal deliberation on '{state['query']}', {lobe2_response[-500:]}"  # Use last 500 chars
-        
-        if self.debug:
-            print("=" * 60)
-            print(f"🏁 Final Expert Response: {conclusion}")
-        
-        logger.info(f"Expert {self.name} completed deliberation")
-        
         return {
             **state,
-            "final_conclusion": conclusion,
+            "conversation": self._internal_conversation,
+        }
+
+    async def _lobe3_respond(self, state: ExpertState) -> ExpertState:
+        conversation = state.get("conversation", "")
+        deliberation_log = "\n".join(
+            f"{m['speaker']}: {m['content']}" for m in conversation
+        )
+
+        prompt = (
+            "You are the REPORTER-LOBE.\n"
+            "Your teammates finished their discussion and signalled CONCLUDED.\n\n"
+            "─── FULL DELIBERATION (do NOT quote verbatim) ───\n"
+            f"{deliberation_log}\n\n"
+            "Task: Write a single, polished answer in first-person SINGULAR that\n"
+            "captures every substantive point, arranges them logically(you must have a single voice), and\n"
+            "meets the Coordinator's deliverable requirements.\n\n"
+            "Return ONLY the finished section (no preamble like 'Here is the …')."
+        )
+
+        final_conclusion = await self._lobe3.respond(prompt)
+
+        return {
+            **state,
+            "final_conclusion": final_conclusion,
             "concluded": True
         }
         
