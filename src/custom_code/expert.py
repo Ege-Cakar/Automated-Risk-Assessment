@@ -91,29 +91,43 @@ class Expert:
 
         IMPORTANT: You must focus on the SPECIFIC TASK given by the coordinator, not the entire risk assessment.
 
-        Your role is to ENGAGE in collaborative brainstorming and SYNTHESIZE when ready:
+        Your role is to ENGAGE in collaborative brainstorming with the Creative Lobe and SYNTHESIZE when ready:
         1. Carefully analyze what the Creative Lobe proposed
         2. Challenge assumptions, identify gaps, and expand on ideas
         3. Add systematic structure and analytical depth
         4. Continue the dialogue until the analysis is truly comprehensive
         5. Only conclude when you both have thoroughly explored the topic
 
+        YOUR COMBINED RESPONSE WILL BE WHAT'S GIVEN BACK TO THE COORDINATOR FOR THE TASK YOU WERE ASSIGNED. 
+
         BRAINSTORMING APPROACH:
         - Respond thoughtfully to the creative lobe's proposals and questions
         - Add analytical rigor: "Good point about X, and we should also consider Y because..."
         - Identify gaps: "We're missing coverage of..." or "What about scenarios involving..."
         - Build on ideas: "Your attack scenario becomes even more critical when we consider..."
+        - Consider cause and effect: "Because of X, Y..."
         - Ask for clarification or expansion when needed
         - Suggest continuing the discussion if more depth is needed
 
-        IMPORTANT: Don't rush to conclude! If the analysis feels incomplete:
-        - Say something like: "Before we finalize, let's also explore..." 
-        - Or: "Creative lobe, what are your thoughts on [specific aspect]?"
-        - Continue iterating until you're both satisfied
+        IMPORTANT: Don't rush to conclude! If the analysis feels incomplete, continue iterating until you're both satisfied.
 
         When you ARE ready to conclude (after thorough discussion):
         1. Use create_section to document the FULL collaborative analysis
-        2. Write "CONCLUDE:" followed by the COMPLETE deliverables
+        2. Write "RESPONSE:" followed by the COMPLETE deliverables
+
+        When concluding:
+        - State what you created (e.g., "I have created Step 3 as requested")
+        - Do NOT suggest what should happen next
+        - Do NOT mention other SWIFT steps
+        - Let the coordinator manage the process
+
+        Example GOOD conclusion:
+        "RESPONSE: I have created the Purpose Statement for Step 3, defining objectives and success criteria for contractor management."
+
+        Example BAD conclusion:
+        "RESPONSE: I have created Step 3. Next we should proceed to Step 4 and create dashboards..."
+
+        Remember: One task, one deliverable, then return control to the coordinator.
 
         Your analysis should be:
         - DETAILED and COMPREHENSIVE - don't just summarize, provide full analysis
@@ -123,24 +137,20 @@ class Expert:
         - SYSTEMATIC with clear premises, inductions and conclusions!
 
         CRITICAL INSTRUCTION FOR CONCLUSIONS:
-        When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your CONCLUDE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.
+        When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your RESPONSE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.
 
         BAD Example (DON'T DO THIS):
-        "CONCLUDE: I have identified comprehensive guide words that cover all aspects..."
+        "RESPONSE: I have identified comprehensive guide words that cover all aspects..."
 
         GOOD Example (DO THIS):
-        "CONCLUDE: Here are the comprehensive guide words for MFA risk assessment:
+        "RESPONSE: Here are the comprehensive guide words for MFA risk assessment:
 
-        **Timing Guide Words:**
-        - DELAYED: Authentication factor arrives too late
-        - EARLY: Factor validation before user initiates
-        - EXPIRED: Token or session timeout
         [... all the actual guide words ...]"
 
         IMPORTANT INSTRUCTIONS FOR TOOLS AND CONCLUSION:
         1. Use create_section ONLY ONCE to document your FULL analysis
-        2. After using create_section, provide a text response with "CONCLUDE:" 
-        3. In your CONCLUDE section, you MUST:
+        2. After using create_section, provide a text response with "RESPONSE:" 
+        3. In your RESPONSE section, you MUST:
         - DELIVER what was requested (the actual guide words, scenarios, risks, etc.)
         - Include the COMPLETE content, not summaries or references
         - Provide any additional context or recommendations AFTER the deliverables
@@ -151,7 +161,7 @@ class Expert:
         - If asked for risks → Detail ALL the identified risks
         - If asked for analysis → Present the FULL analysis
 
-        The coordinator cannot see your tool calls - they only see your CONCLUDE response. Make sure it contains everything they need!
+        The coordinator cannot see your tool calls - they only see your RESPONSE response. Make sure it contains everything they need!
 
         Tools:
         - read_current_document: Review the emerging risk assessment
@@ -337,13 +347,13 @@ class Expert:
             "content": response
         })
         
-        # Check for CONCLUDE (without colon requirement)
-        concluded = "CONCLUDE" in response.upper()
+        # Check for RESPONSE (without colon requirement)
+        concluded = "RESPONSE" in response.upper()
         
         if self.debug:
             if concluded:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
-                print(f"\n✅ Expert {self.name} deliberation CONCLUDED")
+                print(f"\n✅ Expert {self.name} deliberation concluded.")
             else:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
         
@@ -367,9 +377,9 @@ class Expert:
         if state.get("concluded", False):
             return "conclude"
         
-        # Check for CONCLUDE in the actual response (case insensitive)
+        # Check for RESPONSE in the actual response (case insensitive)
         lobe2_response = state.get("lobe2_response", "")
-        if "CONCLUDE" in lobe2_response.upper():
+        if "RESPONSE" in lobe2_response.upper():
             return "conclude"
         
         if state.get("iteration_count", 0) >= state.get("max_rounds", 3) * 2:
@@ -384,10 +394,10 @@ class Expert:
         if self.debug:
             print(f"\n🎯 Extracting final conclusion for Expert {self.name}")
         
-        # Look for CONCLUDE: in lobe2 response
+        # Look for RESPONSE: in lobe2 response
         lobe2_response = state.get("lobe2_response", "")
 
-        conclude_patterns = ["CONCLUDE:", "CONCLUDE\n", "CONCLUDE "]
+        conclude_patterns = ["RESPONSE:", "RESPONSE\n", "RESPONSE "]
         conclusion_found = False
 
         for pattern in conclude_patterns:
@@ -412,12 +422,29 @@ class Expert:
             
             summary_prompt = f"""Based on the internal deliberation above, provide the expert's final conclusion.
 
-    Start with "CONCLUDE: " and then provide:
-    1. Key findings from the deliberation
-    2. Main risks or recommendations identified
-    3. Actionable next steps
+        1. Use create_section to document the FULL collaborative analysis
+        2. Write "RESPONSE:" followed by the COMPLETE deliverables
 
-    Keep it professional and focused on the specific task requested."""
+        Your analysis should be:
+        - DETAILED and COMPREHENSIVE - don't just summarize, provide full analysis
+        - STRUCTURED with clear headings and organization
+        - SPECIFIC with concrete examples and scenarios
+        - ACTIONABLE with clear risk chains and implications
+        - SYSTEMATIC with clear premises, inductions and conclusions!
+
+        CRITICAL INSTRUCTION FOR RESPONSES:
+        When the coordinator asks for specific deliverables (guide words, scenarios, risks, etc.), your RESPONSE section MUST include the ACTUAL DELIVERABLES, not just commentary about them.
+
+        BAD Example (DON'T DO THIS):
+        "RESPONSE: I have identified comprehensive guide words that cover all aspects..."
+
+        GOOD Example (DO THIS):
+        "RESPONSE: Here are the comprehensive guide words for MFA risk assessment:
+
+        [... all the actual guide words ...]"
+
+        Do not forget that you are conversing argumentatively with the coordinator.
+"""
             
             summary_response = await self._lobe2.respond(summary_prompt, full_context)
             

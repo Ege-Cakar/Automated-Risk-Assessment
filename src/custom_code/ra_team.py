@@ -76,6 +76,7 @@ class ExpertTeam:
         # Build routing map dynamically: each expert name maps to itself
         route_map = {name: name for name in self.experts}
         route_map["summarize"] = "generate_summary"
+        route_map["continue_coordinator"] = "coordinator"
 
         workflow.add_conditional_edges(
             "coordinator",
@@ -151,10 +152,17 @@ class ExpertTeam:
         """Coordinator decides next action"""
         decision_data = await self.coordinator.decide_next_action(state)
         
+        # Only require instructions when handing off to an expert
+        instructions = ""
+        if decision_data["decision"] not in ["continue_coordinator", "summarize", "end"]:
+            instructions = decision_data.get("instructions", "Please analyze the query based on your expertise")
+        elif decision_data["decision"] == "summarize":
+            instructions = decision_data.get("instructions", "Create final comprehensive summary")
+        
         new_state = {
             **state,
             "coordinator_decision": decision_data["decision"],
-            "coordinator_instructions": decision_data["instructions"],
+            "coordinator_instructions": instructions,  # Use the conditional instructions
             "conversation_keywords": decision_data.get("keywords", state.get("conversation_keywords", [])),
             "messages": state["messages"] + [{
                 "speaker": "Coordinator",
@@ -272,7 +280,11 @@ class ExpertTeam:
     def _route_after_coordinator(self, state: TeamState) -> str:
         """Return the next node key based on coordinator decision"""
         decision = state["coordinator_decision"]
-        if decision == "summarize":
+        
+        # Handle continuation
+        if decision == "continue_coordinator":
+            return "continue_coordinator"
+        elif decision == "summarize":
             return "summarize"
         elif decision == "end":
             return "finalize"  # triggers END via finalize node

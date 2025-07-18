@@ -10,6 +10,7 @@ class EventType(Enum):
     COORDINATOR_DECISION = "coordinator_decision"
     COORDINATOR_REASONING = "coordinator_reasoning"
     COORDINATOR_KEYWORDS = "coordinator_keywords"
+    COORDINATOR_CONTINUING = "coordinator_continuing"
     
     # Expert events
     EXPERT_STARTING = "expert_starting"

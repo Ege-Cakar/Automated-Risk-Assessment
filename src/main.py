@@ -17,6 +17,7 @@ from src.utils.memory import initialize_database
 from pathlib import Path
 from langchain_google_genai import ChatGoogleGenerativeAI
 import inquirer
+from src.utils.system_prompts import EXPERT_EXTRAS
 
 
 load_dotenv()
@@ -185,6 +186,8 @@ async def main():
 
         I want you to have arguments clearly laid out. I want you to be thorough. 
 
+        What you are saying must be logically and argumentatively complete with premises, inferences and conclusions. EVERYTHING YOU SAY MUST BE WELL SUPPORTED, EITHER THROUGH ARGUMENTATION OR EVIDENCE.
+
         """
 
         # Generate summary directly
@@ -248,7 +251,7 @@ async def main():
                 name=expert["name"].lower().replace(" ", "_").replace("-","_"),
                 model_client=model_client,
                 vector_memory=vector_memory,
-                system_message=expert["system_prompt"],
+                system_message=expert["system_prompt"]+"\n\n"+EXPERT_EXTRAS,
                 lobe1_config=lobe1_config,
                 lobe2_config=lobe2_config,
                 debug=DEBUG_INTERNAL_DELIBERATION  # Let team handle debug output

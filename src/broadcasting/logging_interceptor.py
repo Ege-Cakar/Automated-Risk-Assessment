@@ -15,6 +15,7 @@ class StructuredLogInterceptor:
         'expert_response': re.compile(r'(🎨 Creative Lobe|🧠 Reasoning Lobe) \((.+)\): (.+)'),
         'http_request': re.compile(r'HTTP Request: (\w+) (.+) "(.+)"'),
         'team_status': re.compile(r'(🚀|✅|📊|👥|⏱️|📋) (.+)'),
+        'coordinator_continuing': re.compile(r'🔄 Coordinator continuing with tools'),
     }
     
     def __init__(self, job_id: str):
@@ -116,6 +117,14 @@ class StructuredLogInterceptor:
                     "icon": match.group(1),
                     "message": match.group(2)
                 },
+                self.job_id
+            )
+            return
+
+        if "continue_coordinator" in message:
+            await event_broadcaster.broadcast(
+                EventType.COORDINATOR_CONTINUING,
+                {"message": "Coordinator performing additional analysis"},
                 self.job_id
             )
             return
