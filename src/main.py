@@ -36,6 +36,26 @@ async def main():
     Path("data/report").mkdir(parents=True, exist_ok=True)
     Path("data/conversations").mkdir(parents=True, exist_ok=True)
     
+    # Reset data files to empty/default state
+    print("Resetting data files...")
+    
+    # Reset JSON files to empty objects
+    json_files = [
+        "data/report/current_document.json",
+        "data/report/history.json", 
+        "data/report/sections.json"
+    ]
+    
+    for json_file in json_files:
+        with open(json_file, "w") as f:
+            f.write("{}")
+    
+    # Reset report.md to empty
+    with open("data/report/report.md", "w") as f:
+        f.write("")
+    
+    print("Data files reset complete.\n")
+    
     report = "data/text_files/report.md"
     
     # ADDED: Interactive menu

@@ -64,9 +64,11 @@ class Expert:
         5. Continue until you both agree the analysis is comprehensive
 
         ARGUMENTATION APPROACH:
-        Even in creative mode, structure your thinking:
+        Structure your thinking:
         - "Given [observation], I hypothesize [risk scenario] because [reasoning]"
         - "This could lead to [consequence] through [mechanism]"
+
+        You want to go back and forth with the reasoning lobe. 
 
         Example opening for keyword generation:
         "For authentication keywords, I propose:
@@ -96,13 +98,19 @@ class Expert:
         - Strengthen inferences: "Additionally, this connects to Y through mechanism Z"
         - Expand conclusions: "This implies we also need to consider..."
 
+        Go back and forth AT LEAST once before concluding. You want to give a lot of thought to the matter. 
+
         SYNTHESIS REQUIREMENTS:
         When ready to conclude (after thorough deliberation):
-        1. Use create_section ONCE with the FULL collaborative analysis
-        2. Write "CONCLUDED" to let the summarizer lobe, who will take over from there, know that you are finished
-        3. Include ALL content requested (actual keywords, scenarios, etc.)
-        4. Present clear argument chains for each item
+        1. Use create_section EXACTLY ONCE with the FULL collaborative analysis - DO NOT create multiple sections
+        2. After the tool result, provide a brief text analysis of what you created
+        3. End with "CONCLUDED" to signal the summarizer lobe should take over
+        4. Include ALL content requested (actual keywords, scenarios, etc.) in the ONE section
+        5. Present clear argument chains for each item in that section
 
+        CRITICAL: Create only ONE section with create_section tool, then provide TEXT commentary. 
+        DO NOT create multiple sections like "review" or "analysis" sections - put everything in ONE comprehensive section.
+        
         Remember: The coordinator needs the ACTUAL deliverables with full reasoning. Also remember to always include CONCLUDED in the final response. 
 
         IF YOU DON'T INCLUDE CONCLUDED IN YOUR FINAL RESPONSE, THEN THE COORDINATOR WILL NOT SEE YOUR FINAL RESPONSE AND WILL NOT BE ABLE TO USE IT. YOU WILL BE MESSING THINGS UP!
@@ -228,12 +236,14 @@ class Expert:
             self._initialized = True
             logger.info(f"Initialized both lobes for Expert {self.name}")
         
+        # Clear conversation for new deliberation (fresh start for each query)
         self._internal_conversation = []
 
         if self.debug:
             print(f"\n🔄 Starting internal deliberation for Expert {self.name}")
             print(f"📋 Query: {state['query']}")
             print(f"🎯 Max rounds: {state.get('max_rounds', 3)}")
+            print(f"📝 Starting fresh conversation")
             print("=" * 60)
         
         return {
@@ -262,6 +272,7 @@ class Expert:
         
         if self.debug:
             print(f"\n🎨 Creative Lobe ({self.name}): {response}")
+            print(f"📝 Conversation now has {len(self._internal_conversation)} messages")
         logger.info(f"Lobe 1 (Creative) responded for Expert {self.name}")
         
         return {
@@ -285,8 +296,14 @@ class Expert:
         # Check if there was a tool call in the response
         tool_used = "Tool" in response# and "result:" in response
         
+        # If a tool was used, we should conclude after this response
+        force_conclusion = False
+        
         # If a tool was used, extract the result and add follow-up
         if tool_used:
+            # Set flag to force conclusion after tool use
+            force_conclusion = True
+            
             # Check if there's meaningful content after the tool result
             lines = response.strip().split('\n')
             tool_section_ended = False
@@ -309,7 +326,7 @@ class Expert:
                 
                 # Now ask for analysis
                 analysis_context = context + f"\n--{self.name}_VoReason: {response}"
-                analysis_prompt = "Based on the tool result above, please provide your analysis and either continue the discussion or conclude with your findings."
+                analysis_prompt = "Based on the tool result above, please provide your text analysis of what you created. DO NOT use any more tools - just provide text commentary on the section you created and conclude with 'CONCLUDED' to signal completion."
                 
                 follow_up_response = await self._lobe2.respond(analysis_prompt, analysis_context)
                 response = f"{response}\n\n{follow_up_response}"
@@ -323,15 +340,25 @@ class Expert:
             "content": response
         })
         
-        # Check for RESPONSE (without colon requirement)
-        concluded = "RESPONSE" in response.upper()
+        # Check for conclusion signals or force conclusion after tool use
+        concluded = (
+            "CONCLUDED" in response.upper() or 
+            "CONCLUDE" in response.upper() or
+            "RESPONSE" in response.upper() or
+            force_conclusion
+        )
         
         if self.debug:
             if concluded:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
-                print(f"\n✅ Expert {self.name} deliberation concluded.")
+                print(f"📝 Conversation now has {len(self._internal_conversation)} messages")
+                if force_conclusion:
+                    print(f"\n✅ Expert {self.name} deliberation concluded after tool use.")
+                else:
+                    print(f"\n✅ Expert {self.name} deliberation concluded.")
             else:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
+                print(f"📝 Conversation now has {len(self._internal_conversation)} messages")
         
         logger.info(f"Lobe 2 (Reasoning) responded for Expert {self.name}")
         
@@ -339,7 +366,8 @@ class Expert:
             **state,
             "lobe2_response": response,
             "messages": state.get("messages", []) + [f"Reasoning: {response}"],
-            "concluded": concluded
+            "concluded": concluded,
+            "tool_used_by_lobe2": tool_used
         }
     
     def _should_continue_after_lobe1(self, state: ExpertState) -> str:
@@ -350,6 +378,11 @@ class Expert:
     
     def _should_continue_after_lobe2(self, state: ExpertState) -> str:
         lobe2_response = state.get("lobe2_response", "")
+        tool_used_by_lobe2 = state.get("tool_used_by_lobe2", False)
+        
+        # If lobe2 used a tool, force conclusion to trigger summarization
+        if tool_used_by_lobe2:
+            return "conclude"
 
         # ───── early-exit hooks ─────
         done = (
@@ -359,6 +392,7 @@ class Expert:
             or "CONCLUDE\n" in lobe2_response.upper()
             or "CONCLUDE " in lobe2_response.upper()
             or "CONCLUDE." in lobe2_response.upper()
+            or "RESPONSE" in lobe2_response.upper()  # Added RESPONSE check
         )
         if done:
             return "conclude"
@@ -369,13 +403,25 @@ class Expert:
         return "lobe1"
     
     async def _extract_conclusion(self, state: ExpertState) -> ExpertState:
+        if self.debug:
+            print(f"\n📋 Extracting conclusion with {len(self._internal_conversation)} conversation messages")
+            for i, msg in enumerate(self._internal_conversation):
+                print(f"  {i+1}. {msg['speaker']}: {msg['content'][:100]}...")
+        
         return {
             **state,
             "conversation": self._internal_conversation,
         }
 
     async def _lobe3_respond(self, state: ExpertState) -> ExpertState:
-        conversation = state.get("conversation", "")
+        # Always use self._internal_conversation directly (more reliable than state passing)
+        conversation = self._internal_conversation
+        
+        if self.debug:
+            print(f"\n📝 Summarizer Lobe ({self.name}) starting...")
+            print(f"📊 Processing {len(conversation)} conversation messages from internal deliberation")
+        
+        # Build deliberation log from conversation messages
         deliberation_log = "\n".join(
             f"{m['speaker']}: {m['content']}" for m in conversation
         )
@@ -386,12 +432,19 @@ class Expert:
             "─── FULL DELIBERATION (do NOT quote verbatim) ───\n"
             f"{deliberation_log}\n\n"
             "Task: Write a single, polished answer in first-person SINGULAR that\n"
-            "captures every substantive point, arranges them logically(you must have a single voice), and\n"
+            "captures every substantive point, arranges them logically (you must have a single voice), and\n"
             "meets the Coordinator's deliverable requirements.\n\n"
             "Return ONLY the finished section (no preamble like 'Here is the …')."
         )
 
         final_conclusion = await self._lobe3.respond(prompt)
+        
+        if self.debug:
+            print(f"\n📋 Summarizer Lobe ({self.name}) completed")
+            print(f"📤 Final conclusion length: {len(final_conclusion)} characters")
+            print(f"\n📝 Summarizer Lobe ({self.name}): {final_conclusion}")
+        
+        logger.info(f"Lobe 3 (Summarizer) responded for Expert {self.name}")
 
         return {
             **state,
