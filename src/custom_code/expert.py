@@ -56,6 +56,15 @@ class Expert:
 
         Your role: Generate innovative risk perspectives through structured dialogue with the reasoning lobe.
 
+        CRITICAL: NO FABRICATION RULE
+        - DO NOT invent specific numbers, dates, incidents, or statistics
+        - DO NOT create fictional case studies, reports, or historical events
+        - DO NOT fabricate specific regulatory citations, standards versions, or compliance details
+        - When you need examples, use GENERIC placeholders and EXPLICIT ESTIMATES
+        - If you don't have factual information, say "this would need to be verified" or "actual data would be required". This is an important part of your task as well, finding out where we need more data!
+        - Focus on LOGICAL REASONING and RISK PATTERNS rather than specific fabricated details!!!!!!!!!
+        - YOU ARE ALLOWED TO SAY YOU DON'T KNOW.
+
         DELIBERATION PROCESS:
         1. Start with creative proposals for the SPECIFIC task
         2. Present your ideas with initial reasoning
@@ -84,6 +93,17 @@ class Expert:
         lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
 
         Your role: Analyze, structure, and synthesize the creative input into a comprehensive response.
+
+        CRITICAL: NO FABRICATION RULE
+        - DO NOT invent specific numbers, dates, incidents, statistics, or case studies
+        - DO NOT create fictional regulatory citations, standards versions, or compliance details  
+        - DO NOT fabricate specific company names, survey results, or historical events
+        - DO NOT make up precise percentages, costs, timeframes, or technical specifications
+        - When examples are needed, use GENERIC terms or EXPLICIT ESTIMATES 
+        - If specific data is required, explicitly state "actual data would need to be obtained" or "this requires verification"This is an important part of your task as well, finding out where we need more data!
+        - Focus on LOGICAL FRAMEWORKS and RISK PRINCIPLES rather than fabricated specifics
+        - Base arguments on REASONING and ESTABLISHED PATTERNS, not invented details
+        - YOU ARE ALLOWED TO SAY YOU DON'T KNOW.
 
         DELIBERATION PROCESS:
         1. Critically examine each creative proposal
@@ -128,11 +148,20 @@ class Expert:
         • You read the *entire* internal deliberation that has already reached the
         CONCLUDED signal that was given to you.
 
+        CRITICAL: NO FABRICATION RULE
+        - DO NOT add any specific numbers, dates, incidents, or statistics not present in the deliberation
+        - DO NOT invent new regulatory citations, standards, or compliance details
+        - DO NOT create new case studies, historical events, or technical specifications
+        - ONLY use information that was actually discussed in the internal deliberation
+        - If the deliberation contains fabricated details, DO NOT repeat them - use generic terms instead
+        - Replace specific invented details with phrases like "relevant incidents", "applicable standards", "typical scenarios"
+
         • Your only goal is to turn the material you see into a cohesive, polished response from the voice of one expert, in first person. 
         – Preserve all factual / argumentative content.  
         – Fix ordering, markdown, headings, spacing.  
         – Speak in **first-person singular** (“I …”).  
         – Do NOT add new analysis or reopen discussion.
+        – Do NOT add fabricated specifics to make the response sound more convincing.
 
         Return ONLY the polished text that should be shown to the coordinator, who you are responding to –
         no commentary, no wrappers.

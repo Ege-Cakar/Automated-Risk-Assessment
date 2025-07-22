@@ -36,7 +36,8 @@ class ExpertTeam:
         max_messages: int = 40,
         recursion_limit: int = 125,
         debug: bool = False,
-        conversation_path: str = "conversation.json"
+        conversation_path: str = "conversation.json",
+        resume_checkpoint: str | None = None,
     ):
         self.coordinator = coordinator
         self.experts = experts
@@ -48,8 +49,15 @@ class ExpertTeam:
 
         Path(self.conversation_path).mkdir(parents=True, exist_ok=True)
         
-        # Generate unique conversation ID
+        # Generate unique conversation ID (overridden if resuming)
         self.conversation_id = f"conversation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # If resuming, load checkpoint immediately
+        self._checkpoint_state: TeamState | None = None
+        if resume_checkpoint is not None and Path(resume_checkpoint).exists():
+            self._checkpoint_state = self._load_checkpoint_state(resume_checkpoint)
+            # Use the same conversation id so future files append correctly
+            self.conversation_id = self._checkpoint_state.get("conversation_id", self.conversation_id)
 
         # Build the team graph
         self.team_graph = self._build_team_graph()
@@ -89,6 +97,12 @@ class ExpertTeam:
         workflow.add_edge("finalize", END)
     
         return workflow.compile()
+
+    def _load_checkpoint_state(self, checkpoint_file: str) -> TeamState:
+        """Load a previously saved conversation state JSON file"""
+        with open(checkpoint_file, "r") as f:
+            data = json.load(f)
+        return data  # type: ignore
 
     def _save_conversation_state(self, state: TeamState, step_name: str):
         """Save current conversation state to JSON"""
@@ -292,7 +306,7 @@ class ExpertTeam:
             # coordinator returns the expert name directly; fallback to first expert
             return decision if decision in self.experts else next(iter(self.experts))
     
-    async def consult(self, query: str) -> str:
+    async def consult(self, query: str, resume: bool = False) -> str:
         """Main method to run team consultation"""
         
         if self.debug:
@@ -303,20 +317,28 @@ class ExpertTeam:
             print(f"👥 Available Experts: {list(self.experts.keys())}")
             print(f"⏱️  Max Messages: {self.max_messages}")
         
-        # Initialize team state
-        initial_state: TeamState = {
-            "messages": [],
-            "query": query,
-            "current_speaker": "Coordinator",
-            "conversation_keywords": [],
-            "expert_responses": {},
-            "message_count": 0,
-            "max_messages": self.max_messages,
-            "concluded": False,
-            "coordinator_decision": "",
-            "final_report": "",
-            "debug": self.debug
-        }
+        if resume and self._checkpoint_state is not None:
+            initial_state = self._checkpoint_state  # type: ignore
+            # Ensure debug and max_messages stay current
+            initial_state["debug"] = self.debug
+            initial_state["max_messages"] = self.max_messages
+            if self.debug:
+                print(f"\n🔄 Resuming consultation from checkpoint: {self.conversation_id}\n")
+        else:
+            # Initialize fresh team state
+            initial_state: TeamState = {
+                "messages": [],
+                "query": query,
+                "current_speaker": "Coordinator",
+                "conversation_keywords": [],
+                "expert_responses": {},
+                "message_count": 0,
+                "max_messages": self.max_messages,
+                "concluded": False,
+                "coordinator_decision": "",
+                "final_report": "",
+                "debug": self.debug
+            }
         
         try:
             # Run the team consultation

@@ -242,15 +242,60 @@ Respond with valid JSON only.
                 }
             )
 
-        # Ask for final JSON decision
+        # Ask for final JSON decision – allow successive tool calls
         follow_prompt = (
             "Based on the tool results above, provide your decision in **JSON only** "
             "with keys: reasoning · decision · keywords · instructions."
         )
         tool_msgs.append({"role": "user", "content": follow_prompt})
 
-        follow = await self.model_client.ainvoke(tool_msgs)
-        return self._safe_json_from_text(follow.content)
+        # Loop to support multiple assistant→tool rounds until we finally get JSON text
+        max_tool_rounds = 5  # safety guard to avoid infinite loops
+        rounds = 0
+        while rounds < max_tool_rounds:
+            rounds += 1
+            follow = await self.model_client.ainvoke(tool_msgs)
+            # Record assistant reply
+            tool_msgs.append(
+                {
+                    "role": "assistant",
+                    "content": follow.content,
+                    "tool_calls": getattr(follow, "tool_calls", None),
+                }
+            )
+
+            if getattr(follow, "tool_calls", None):
+                # Execute each subsequent tool call
+                for tc in follow.tool_calls:
+                    tool_fn = next((t for t in self.tools if t.name == tc["name"]), None)
+                    if not tool_fn:
+                        tool_msgs.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": f"Error: tool {tc['name']} not found",
+                            }
+                        )
+                        continue
+                    try:
+                        result = await tool_fn.ainvoke(tc["args"])
+                    except Exception as exc:
+                        result = f"Error executing tool: {exc}"
+                    tool_msgs.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": str(result),
+                        }
+                    )
+                # After executing tools, continue loop to ask again for JSON decision
+                tool_msgs.append({"role": "user", "content": follow_prompt})
+                continue
+            # Assistant returned no tool calls – expect JSON content
+            return self._safe_json_from_text(follow.content)
+
+        # If we exit loop without return, raise descriptive error
+        raise RuntimeError("Exceeded maximum successive tool rounds without JSON response")
 
     # ------------------------------------------------------------------ #
     @staticmethod
