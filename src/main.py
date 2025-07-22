@@ -6,6 +6,9 @@ from langgraph.graph import StateGraph, START, END
 import json
 import logging
 import asyncio
+import signal
+import os 
+import pickle
 from dotenv import load_dotenv
 from src.custom_code.expert import Expert
 from src.custom_code.lobe import LobeVectorMemory   
@@ -36,29 +39,9 @@ async def main():
     Path("data/report").mkdir(parents=True, exist_ok=True)
     Path("data/conversations").mkdir(parents=True, exist_ok=True)
     
-    # Reset data files to empty/default state
-    print("Resetting data files...")
-    
-    # Reset JSON files to empty objects
-    json_files = [
-        "data/report/current_document.json",
-        "data/report/history.json", 
-        "data/report/sections.json"
-    ]
-    
-    for json_file in json_files:
-        with open(json_file, "w") as f:
-            f.write("{}")
-    
-    # Reset report.md to empty
-    with open("data/report/report.md", "w") as f:
-        f.write("")
-    
-    print("Data files reset complete.\n")
-    
-    report = "data/text_files/report.md"
-    
-    # ADDED: Interactive menu
+    # ----------------------------------------------------------------------------
+    # Interactive Operation Mode Selection
+    # ----------------------------------------------------------------------------
     print("\n" + "="*60)
     print("SWIFT RISK ASSESSMENT SYSTEM")
     print("="*60)
@@ -66,25 +49,75 @@ async def main():
     print("1) Generate from scratch with NEW experts")
     print("2) Generate from scratch with SAVED experts")
     print("3) Generate summary from saved sections.json")
+    print("4) Continue from where we left off")
     print("="*60)
     
     while True:
-        choice = input("\nEnter your choice (1-3): ").strip()
-        if choice in ['1', '2', '3']:
+        choice = input("\nEnter your choice (1-4): ").strip()
+        if choice in ['1', '2', '3', '4']:
             break
-        print("Invalid choice. Please enter 1, 2, or 3.")
+        print("Invalid choice. Please enter 1, 2, 3, or 4.")
     
-    # ADDED: Process choice
-    generate_new_experts = (choice == '1')
-    run_full_assessment = (choice in ['1', '2'])
-    summary_only = (choice == '3')
+    # Process choice flags
+    generate_new_experts: bool = (choice == '1')
+    continue_previous: bool = (choice == '4')
+    run_full_assessment: bool = (choice in ['1', '2', '4'])
+    summary_only: bool = (choice == '3')
     
     print(f"\nSelected: Option {choice}")
     print("="*60 + "\n")
+    
+    # ----------------------------------------------------------------------------
+    # Reset data IF REQUIRED
+    # ----------------------------------------------------------------------------
+    if not continue_previous and not summary_only:
+        print("Resetting data files...")
+        
+        # Remove any previous team state file
+        state_path = "data/text_files/team_state.pkl"
+        if os.path.exists(state_path):
+            try:
+                os.remove(state_path)
+            except OSError:
+                pass
+        
+        # Delete previous generated markdown/text files
+        import glob
+        protected = {"data/text_files/swift_info.md"}
+        for path in glob.glob("data/text_files/*.md"):
+            if path in protected:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        
+        # Reset JSON files to empty objects
+        json_files = [
+            "data/report/current_document.json",
+            "data/report/history.json",
+            "data/report/sections.json",
+        ]
 
-    # Clear report
-    with open(report, "w") as f:
-        f.write("")
+        for json_file in json_files:
+            with open(json_file, "w") as f:
+                f.write("{}")
+        
+        # Reset report.md to empty
+        with open("data/report/report.md", "w") as f:
+            f.write("")
+        
+        print("Data files reset complete.\n")
+    else:
+        print("Continuing with existing data files. No reset performed.\n")
+    
+    report = "data/text_files/report.md"
+    
+    # -----------------------------------------------------------------------------
+    # Clear report if not continuing or in summary mode
+    if not continue_previous and not summary_only:
+        with open(report, "w") as f:
+            f.write("")
 
     if run_full_assessment:
         # Read the risk assessment request file
@@ -283,15 +316,44 @@ async def main():
         summary_agent = SummaryAgent(model_client, debug=DEBUG_INTERNAL_DELIBERATION)
         
         # Create team
-        team = ExpertTeam(
-            coordinator=coordinator,
-            experts=experts,
-            summary_agent=summary_agent,
-            max_messages=40,
-            debug=DEBUG_INTERNAL_DELIBERATION,
-            conversation_path="data/conversations",
-        )
+        state_path = "data/text_files/team_state.pkl"
+        global _team_instance  # for signal handler access
+        if continue_previous and os.path.exists(state_path):
+            try:
+                with open(state_path, "rb") as f:
+                    _team_instance = pickle.load(f)
+                print("✅ Loaded previous team state from team_state.pkl")
+            except Exception as e:
+                print(f"⚠️  Failed to load saved team state: {e}. Initializing new team.")
+                _team_instance = None
+        else:
+            _team_instance = None
+
+        if _team_instance is None:
+            _team_instance = ExpertTeam(
+                coordinator=coordinator,
+                experts=experts,
+                summary_agent=summary_agent,
+                max_messages=40,
+                debug=DEBUG_INTERNAL_DELIBERATION,
+                conversation_path="data/conversations",
+            )
         
+        # Register Ctrl+C handler to save team state
+        def _save_state_handler(signum, frame):
+            if _team_instance is not None:
+                try:
+                    with open(state_path, "wb") as f:
+                        pickle.dump(_team_instance, f)
+                    print("\n💾 Team state saved to data/text_files/team_state.pkl")
+                except Exception as e:
+                    print(f"\n❌ Failed to save team state: {e}")
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGINT, _save_state_handler)
+
+        team = _team_instance
+
         png = team.team_graph.get_graph().draw_mermaid_png()
         
         with open("team_graph.png", "wb") as f:
