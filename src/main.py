@@ -21,6 +21,8 @@ from pathlib import Path
 from langchain_google_genai import ChatGoogleGenerativeAI
 import inquirer
 from src.utils.system_prompts import EXPERT_EXTRAS
+from src.utils.report import get_doc_manager
+from datetime import datetime
 
 
 load_dotenv()
@@ -140,11 +142,17 @@ async def main():
         
         # Create model client using current API
         model_client = ChatOpenAI(
-            model="o3"
+            model="gpt-5",
+            use_responses_api=True,
+            reasoning={"effort": "medium"},
+            output_version="responses/v1",
         )
 
         thinking_client = ChatOpenAI(
-            model="o3"
+            model="gpt-5",
+            use_responses_api=True,
+            reasoning={"effort": "medium"},
+            output_version="responses/v1",
         )
     
     if generate_new_experts:
@@ -163,7 +171,7 @@ async def main():
         """
 
         expert_generator = ExpertGenerator(
-            model="o3",
+            model="gpt-5",
             provider="openai",
             min_experts=5,
             max_experts=12
@@ -187,11 +195,9 @@ async def main():
         with open("data/text_files/swift_info.md", "r", encoding="utf-8") as file:
             swift_info = file.read()
         
-        # Import DocumentManager
-        from src.utils.document_manager import DocumentManager
-        
-        # Load existing document manager
-        doc_manager = DocumentManager(base_path="data/report")
+        # Re-use the shared DocumentManager singleton so we see the same sections that the
+        # tool functions created during normal runs.
+        doc_manager = get_doc_manager()
         
         if not doc_manager.sections:
             print("❌ No saved sections found in data/report/sections.json")
@@ -199,7 +205,12 @@ async def main():
             return
         
         # Create model client without tools binding for direct summary
-        model_client = ChatOpenAI(model="o3")
+        model_client = ChatOpenAI(
+            model="gpt-5",
+            use_responses_api=True,
+            reasoning={"effort": "medium"},
+            output_version="responses/v1",
+        )
         
         # Build content from saved sections
         messages = []
@@ -373,6 +384,54 @@ async def main():
             print("="*80)
         
         print(f"{response}")
+        
+        # ============================================================================
+        # MARKDOWN EXPORT AND VERIFICATION
+        # ============================================================================
+        
+        if DEBUG_INTERNAL_DELIBERATION:
+            print("\n" + "="*80)
+            print(f"💾 SAVING DOCUMENT AS MARKDOWN")
+            print("="*80)
+        
+        try:
+            # Get the document manager and export to markdown
+            doc_manager = get_doc_manager()
+            markdown_content = doc_manager.get_current_document_markdown()
+            
+            # Create filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            markdown_filename = f"data/report/risk_assessment_report_{timestamp}.md"
+            
+            # Save markdown file
+            with open(markdown_filename, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            
+            if DEBUG_INTERNAL_DELIBERATION:
+                print(f"✅ Markdown report saved to: {markdown_filename}")
+                print(f"📄 Document length: {len(markdown_content)} characters")
+                
+                # Verify summarizer received content by checking if final response contains summary
+                if len(response) > 100:  # Reasonable length check
+                    print(f"✅ Summarizer appears to be working - Final response length: {len(response)} characters")
+                else:
+                    print(f"⚠️  Warning: Final response seems short ({len(response)} chars) - Check if summarizer is receiving content properly")
+                
+                # Show preview of markdown content
+                preview_lines = markdown_content.split('\n')[:10]
+                print(f"\n📋 MARKDOWN PREVIEW (first 10 lines):")
+                print("-" * 40)
+                for line in preview_lines:
+                    print(line)
+                if len(markdown_content.split('\n')) > 10:
+                    print("... (truncated)")
+                print("-" * 40)
+                
+        except Exception as e:
+            print(f"❌ Error saving markdown: {e}")
+            if DEBUG_INTERNAL_DELIBERATION:
+                import traceback
+                traceback.print_exc()
 
 if __name__ == "__main__":
     asyncio.run(main())

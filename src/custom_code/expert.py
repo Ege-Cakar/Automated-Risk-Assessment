@@ -54,7 +54,38 @@ class Expert:
 
         lobe1_general = """You are the CREATIVE LOBE in an internal expert deliberation.
 
-        Your role: Generate innovative risk perspectives through structured dialogue with the reasoning lobe.
+Your role: Generate novel risk perspectives that the Reasoning Lobe will critique and refine.
+
+┌────────────────────────────────────────────────────────────┐
+│ STYLE GUIDE  (Multi-ADU Argumentative Prose)               │
+├────────────────────────────────────────────────────────────┤
+│ • Write fluent prose. Whenever you shift the logical focus │
+│   start a new argumentative discourse unit.                │
+│ • An ADU is 1 – 2 sentences. Several ADUs may share a      │
+│   paragraph or be on separate lines.                       │
+│ • Embed an explicit relational cue in every ADU so that    │
+│   a classifier can tag it:                                 │
+│     – support → “This supports…”, “This reinforces…”       │
+│     – attack  → “However, this challenges…”, “This weakens…”│
+│ • No fabricated evidence:                                  │
+│     – If you lack a real citation, write “indicative        │
+│       incident (source verification required)”.            │
+│     – Avoid invented numbers; use ranges or say “exact      │
+│       figure TBD”.                                         │
+│ • Use causal words rather than arrows: “because”, “therefore”.│
+│                                                            │
+│ ⛔️  FORMATTING TO AVOID                                    │
+│ • Arrows (→, =>), emojis, bare matrix codes (e.g. “3×5”).  │
+│ • Lines under 8 words, stray bullets (“- ” at start).      │
+│                                                            │
+│ ✅  SELF-TEST BEFORE SENDING                               │
+│   – Any line with < 8 words? → rewrite.                    │
+│   – Any arrow symbol present?   → replace with words.      │
+└────────────────────────────────────────────────────────────┘
+
+Invite critique (“What gaps do you see?”) and iterate.  
+Focus on logic and risk patterns—**no invented specifics**.
+
 
         CRITICAL: NO FABRICATION RULE
         - DO NOT invent specific numbers, dates, incidents, or statistics
@@ -62,22 +93,8 @@ class Expert:
         - DO NOT fabricate specific regulatory citations, standards versions, or compliance details
         - When you need examples, use GENERIC placeholders and EXPLICIT ESTIMATES
         - If you don't have factual information, say "this would need to be verified" or "actual data would be required". This is an important part of your task as well, finding out where we need more data!
-        - Focus on LOGICAL REASONING and RISK PATTERNS rather than specific fabricated details!!!!!!!!!
+        - Focus on LOGICAL REASONING and RISK PATTERNS rather than specific fabricated details!
         - YOU ARE ALLOWED TO SAY YOU DON'T KNOW.
-
-        DELIBERATION PROCESS:
-        1. Start with creative proposals for the SPECIFIC task
-        2. Present your ideas with initial reasoning
-        3. Explicitly invite critique: "What gaps do you see?" "How would this fail?"
-        4. Build on feedback iteratively
-        5. Continue until you both agree the analysis is comprehensive
-
-        ARGUMENTATION APPROACH:
-        Structure your thinking:
-        - "Given [observation], I hypothesize [risk scenario] because [reasoning]"
-        - "This could lead to [consequence] through [mechanism]"
-
-        You want to go back and forth with the reasoning lobe. 
 
         Example opening for keyword generation:
         "For authentication keywords, I propose:
@@ -92,7 +109,43 @@ class Expert:
 
         lobe2_general = """You are the REASONING LOBE in an internal expert deliberation.
 
-        Your role: Analyze, structure, and synthesize the creative input into a comprehensive response.
+Your role: Analyse and structure the Creative Lobe’s ideas into a coherent argument.
+
+┌────────────────────────────────────────────────────────────┐
+│ STYLE GUIDE  (Multi-ADU Argumentative Prose)               │
+├────────────────────────────────────────────────────────────┤
+│ • Write fluent prose. Whenever you shift the logical focus │
+│   start a new argumentative discourse unit.                │
+│ • An ADU is 1 – 2 sentences. Several ADUs may share a      │
+│   paragraph or be on separate lines.                       │
+│ • Embed an explicit relational cue in every ADU so that    │
+│   a classifier can tag it:                                 │
+│     – support → “This supports…”, “This reinforces…”       │
+│     – attack  → “However, this challenges…”, “This weakens…”│
+│ • No fabricated evidence:                                  │
+│     – If you lack a real citation, write “indicative        │
+│       incident (source verification required)”.            │
+│     – Avoid invented numbers; use ranges or say “exact      │
+│       figure TBD”.                                         │
+│ • Use causal words rather than arrows: “because”, “therefore”.│
+│                                                            │
+│ ⛔️  FORMATTING TO AVOID                                    │
+│ • Arrows (→, =>), emojis, bare matrix codes (e.g. “3×5”).  │
+│ • Lines under 8 words, stray bullets (“- ” at start).      │
+│                                                            │
+│ ✅  SELF-TEST BEFORE SENDING                               │
+│   – Any line with < 8 words? → rewrite.                    │
+│   – Any arrow symbol present?   → replace with words.      │
+└────────────────────────────────────────────────────────────┘
+• Follow the same opener tokens, relational cues, and no-fabrication rules.  
+• For each incoming ADU decide whether to add a supportive **Reason —** /
+  **Evidence —** or an attacking **Counterargument —** / **Rebuttal —**.  
+• Each new ADU must contain an explicit relational phrase (“This supports…”,  
+  “However, this challenges…”) so downstream mining can identify its stance.  
+• When coverage feels complete, finish with an **Implication —** or  
+  **Recommendation —** that ties the analysis to actionable risk controls.
+
+After you call `create_section` once, write brief commentary and end with **CONCLUDED**.
 
         CRITICAL: NO FABRICATION RULE
         - DO NOT invent specific numbers, dates, incidents, statistics, or case studies
@@ -118,7 +171,7 @@ class Expert:
         - Strengthen inferences: "Additionally, this connects to Y through mechanism Z"
         - Expand conclusions: "This implies we also need to consider..."
 
-        Go back and forth AT LEAST once before concluding. You want to give a lot of thought to the matter. 
+        Go back and forth multiple times before concluding. You want to give a lot of thought to the matter. 
 
         SYNTHESIS REQUIREMENTS:
         When ready to conclude (after thorough deliberation):
@@ -145,8 +198,18 @@ class Expert:
 
         You are the Summarizer.
 
-        • You read the *entire* internal deliberation that has already reached the
-        CONCLUDED signal that was given to you.
+        • Read the entire internal deliberation after it signals CONCLUDED.  
+        • Produce the final answer in first-person singular (“I …”).  
+        • Preserve every ADU opener (Claim —, Reason —, etc.) exactly as written,  
+        even when multiple ADUs share a paragraph.  
+        • Ensure each ADU still contains its relational cue (“This supports…”,  
+        “However, this challenges…”, etc.).  
+        • Rewrite any lingering bullets, arrows, or raw matrix fragments into full  
+        sentences that begin with the correct opener.  
+        • Do NOT invent data or incidents; if you see fabricated content, replace it  
+        with generic wording (“exact figures require verification”).  
+
+        Return only the polished text—no wrappers.
 
         CRITICAL: NO FABRICATION RULE
         - DO NOT add any specific numbers, dates, incidents, or statistics not present in the deliberation
@@ -155,13 +218,6 @@ class Expert:
         - ONLY use information that was actually discussed in the internal deliberation
         - If the deliberation contains fabricated details, DO NOT repeat them - use generic terms instead
         - Replace specific invented details with phrases like "relevant incidents", "applicable standards", "typical scenarios"
-
-        • Your only goal is to turn the material you see into a cohesive, polished response from the voice of one expert, in first person. 
-        – Preserve all factual / argumentative content.  
-        – Fix ordering, markdown, headings, spacing.  
-        – Speak in **first-person singular** (“I …”).  
-        – Do NOT add new analysis or reopen discussion.
-        – Do NOT add fabricated specifics to make the response sound more convincing.
 
         Return ONLY the polished text that should be shown to the coordinator, who you are responding to –
         no commentary, no wrappers.
@@ -277,7 +333,7 @@ class Expert:
         
         return {
             **state,
-            "messages": state.get("messages", []) + ["Starting internal deliberation..."],
+            "messages": state.get("messages", []) + [{"speaker": "System", "content": "Starting internal deliberation..."}],
             "iteration_count": 0,
             "concluded": False
         }
@@ -303,11 +359,16 @@ class Expert:
             print(f"\n🎨 Creative Lobe ({self.name}): {response}")
             print(f"📝 Conversation now has {len(self._internal_conversation)} messages")
         logger.info(f"Lobe 1 (Creative) responded for Expert {self.name}")
-        
+        public_msgs = state.get("messages", [])
+        public_msgs.append({
+            "speaker": self.name,
+            "content": "[Lobe 1 responded...]"
+        })
+
         return {
             **state,
             "lobe1_response": response,
-            "messages": state.get("messages", []) + [f"Creative: {response}"],
+            "messages": public_msgs,
             "iteration_count": state.get("iteration_count", 0) + 1
         }
     
@@ -376,7 +437,11 @@ class Expert:
             "RESPONSE" in response.upper() or
             force_conclusion
         )
-        
+        public_msgs = state.get("messages", [])
+        public_msgs.append({
+            "speaker": self.name,
+            "content": "[Lobe 2 responded...]"
+        })
         if self.debug:
             if concluded:
                 print(f"\n🧠 Reasoning Lobe ({self.name}): {response}")
@@ -394,7 +459,7 @@ class Expert:
         return {
             **state,
             "lobe2_response": response,
-            "messages": state.get("messages", []) + [f"Reasoning: {response}"],
+            "messages": public_msgs,
             "concluded": concluded,
             "tool_used_by_lobe2": tool_used
         }

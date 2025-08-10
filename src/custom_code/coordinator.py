@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import json, regex as re  
 import logging
 from typing import Dict, Any, List
 
@@ -182,13 +182,35 @@ Respond with valid JSON only.
         # ---- first LLM call -------------------------------------------------------------
         assistant = await self.model_client.ainvoke(messages)
 
+
+        # If the assistant invoked tools, execute them and get a follow-up
+        content = None
+        if isinstance(assistant.content, str):
+            content = assistant.content
+        elif isinstance(assistant.content, list):
+            # GPT-5 responses API returns content as list
+            # Look for text content in the list
+            for item in assistant.content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    content = item.get('text', '')
+                    break
+
         # If the assistant invoked tools, execute them and get a follow-up
         if getattr(assistant, "tool_calls", None):
             follow_json = await self._handle_tool_phase(
                 messages, assistant, system_msg
             )
+        elif content:
+            follow_json = self._safe_json_from_text(content)
         else:
-            follow_json = self._safe_json_from_text(assistant.content)
+            # No text content but no tools either - shouldn't happen normally
+            logger.warning(f"No text content or tools in response")
+            follow_json = {
+                "reasoning": "Processing coordinator decision",
+                "decision": "continue_coordinator",
+                "keywords": state.get("conversation_keywords", []),
+            }
+
 
         # ---- sanity-fill missing fields -------------------------------------------------
         follow_json.setdefault("keywords", state.get("conversation_keywords", []))
@@ -208,15 +230,25 @@ Respond with valid JSON only.
         Execute each tool call and then ask the model for its JSON decision.
         Uses **all-dict** messages to stay homogeneous.
         """
-        tool_msgs: List[dict] = base_msgs[:]  # shallow copy (all dicts)
+        tool_msgs: List[dict] = base_msgs[:]
+        content = ""
+        if isinstance(assistant_msg.content, str):
+            content = assistant_msg.content
+        elif isinstance(assistant_msg.content, list):
+            for item in assistant_msg.content:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    content = item.get('text', '')
+                    break
+
         # Append assistant call as dict
         tool_msgs.append(
             {
                 "role": "assistant",
-                "content": assistant_msg.content,
+                "content": content,  # This might be empty for tool calls
                 "tool_calls": assistant_msg.tool_calls,
             }
         )
+
 
         # Execute each tool
         for tc in assistant_msg.tool_calls:
@@ -255,14 +287,24 @@ Respond with valid JSON only.
         while rounds < max_tool_rounds:
             rounds += 1
             follow = await self.model_client.ainvoke(tool_msgs)
+            follow_content = ""
+            if isinstance(follow.content, str):
+                follow_content = follow.content
+            elif isinstance(follow.content, list):
+                for item in follow.content:
+                    if isinstance(item, dict) and item.get('type') == 'text':
+                        follow_content = item.get('text', '')
+                        break
+
             # Record assistant reply
             tool_msgs.append(
                 {
                     "role": "assistant",
-                    "content": follow.content,
+                    "content": follow_content,
                     "tool_calls": getattr(follow, "tool_calls", None),
                 }
             )
+
 
             if getattr(follow, "tool_calls", None):
                 # Execute each subsequent tool call
@@ -292,24 +334,32 @@ Respond with valid JSON only.
                 tool_msgs.append({"role": "user", "content": follow_prompt})
                 continue
             # Assistant returned no tool calls – expect JSON content
-            return self._safe_json_from_text(follow.content)
+            if follow_content:
+                return self._safe_json_from_text(follow_content)
+            else:
+                # No content, return a default
+                logger.warning("No text content in tool follow-up response")
+                return {
+                    "reasoning": "Proceeding with assessment",
+                    "decision": "continue_coordinator",
+                    "keywords": [],
+                }
+
 
         # If we exit loop without return, raise descriptive error
         raise RuntimeError("Exceeded maximum successive tool rounds without JSON response")
 
     # ------------------------------------------------------------------ #
     @staticmethod
-    def _safe_json_from_text(txt: str) -> Dict[str, Any]:
+    def _safe_json_from_text(txt: str):
         """
-        Extract first {...} block or fall back to whole string.
-        Raises on failure so upstream fallback logic can trigger.
+        Return the first JSON object found in txt.
+        Raises ValueError if none can be parsed.
         """
-        if not txt:
-            raise ValueError("LLM returned empty content")
-
-        start = txt.find("{")
-        end = txt.rfind("}") + 1
+        match = re.search(r"\{(?:[^{}]|(?R))*\}", txt, re.S)
+        if not match:
+            raise ValueError(f"No JSON object found\n---RAW---\n{txt}\n---")
         try:
-            return json.loads(txt[start:end] if start != -1 else txt)
+            return json.loads(match.group(0))
         except json.JSONDecodeError as exc:
             raise ValueError(f"Could not parse JSON: {exc}\n---RAW---\n{txt}\n---") from exc

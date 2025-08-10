@@ -143,7 +143,16 @@ class DocumentManager:
             "# Risk Assessment Report\n",
             f"_Generated {datetime.now():%Y-%m-%d %H:%M:%S}_\n\n"
         ]
-        for domain, sid, ver in self.current_document:
+
+        # Fallback: if current_document is empty, derive order from all MERGED sections
+        entries = self.current_document
+        if len(entries) == 0:
+            # sort by updated_at to maintain logical flow
+            merged_sections = [s for s in self.sections.values() if s.status == SectionStatus.MERGED]
+            merged_sections.sort(key=lambda s: s.updated_at)
+            entries = [(s.domain, s.section_id, s.version) for s in merged_sections]
+
+        for domain, sid, ver in entries:
             sec = self.sections[sid]
             parts.extend([
                 f"## {domain.replace('_', ' ').title()}  \n",
