@@ -86,6 +86,7 @@ Your role: Generate novel risk perspectives that the Reasoning Lobe will critiqu
 Invite critique (“What gaps do you see?”) and iterate.  
 Focus on logic and risk patterns—**no invented specifics**.
 
+        CRITICAL: Propose your TOP 3 ideas only. Each idea: maximum 100 words.
 
         CRITICAL: NO FABRICATION RULE
         - DO NOT invent specific numbers, dates, incidents, or statistics
@@ -171,7 +172,7 @@ After you call `create_section` once, write brief commentary and end with **CONC
         - Strengthen inferences: "Additionally, this connects to Y through mechanism Z"
         - Expand conclusions: "This implies we also need to consider..."
 
-        Go back and forth multiple times before concluding. You want to give a lot of thought to the matter. 
+        Go back and forth multiple times before concluding. THINK THOROUGHLY BEFORE ANSWERING, but make sure your actual responses aren't too long -- quality over quantity. 
 
         SYNTHESIS REQUIREMENTS:
         When ready to conclude (after thorough deliberation):

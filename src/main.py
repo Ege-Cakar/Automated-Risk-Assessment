@@ -8,7 +8,7 @@ import logging
 import asyncio
 import signal
 import os 
-import pickle
+ 
 from dotenv import load_dotenv
 from src.custom_code.expert import Expert
 from src.custom_code.lobe import LobeVectorMemory   
@@ -144,14 +144,16 @@ async def main():
         model_client = ChatOpenAI(
             model="gpt-5",
             use_responses_api=True,
-            reasoning={"effort": "medium"},
+            reasoning={"effort": "high"},
+            text={"verbosity": "low"},
             output_version="responses/v1",
         )
 
         thinking_client = ChatOpenAI(
             model="gpt-5",
             use_responses_api=True,
-            reasoning={"effort": "medium"},
+            reasoning={"effort": "high"},
+            text={"verbosity": "low"},
             output_version="responses/v1",
         )
     
@@ -208,7 +210,8 @@ async def main():
         model_client = ChatOpenAI(
             model="gpt-5",
             use_responses_api=True,
-            reasoning={"effort": "medium"},
+            reasoning={"effort": "high"},
+            text={"verbosity": "low"},
             output_version="responses/v1",
         )
         
@@ -322,48 +325,65 @@ async def main():
             )
             experts[expert["name"]] = expert_agent
         
+        coordinator_client = ChatOpenAI(
+            model="gpt-5",
+            use_responses_api=True,
+            reasoning={"effort": "high"},
+            text={"verbosity": "medium"},
+            output_version="responses/v1",
+        )
+
         # Create team components
-        coordinator = Coordinator(model_client, experts, debug=DEBUG_INTERNAL_DELIBERATION, swift_info=swift_info)
+        coordinator = Coordinator(coordinator_client, experts, debug=DEBUG_INTERNAL_DELIBERATION, swift_info=swift_info)
         summary_agent = SummaryAgent(model_client, debug=DEBUG_INTERNAL_DELIBERATION)
         
-        # Create team
-        state_path = "data/text_files/team_state.pkl"
-        global _team_instance  # for signal handler access
-        if continue_previous and os.path.exists(state_path):
+        # Determine resume checkpoint (JSON) if continuing
+        resume_checkpoint: Optional[str] = None
+        if continue_previous:
+            conversations_dir = "data/conversations"
             try:
-                with open(state_path, "rb") as f:
-                    _team_instance = pickle.load(f)
-                print("✅ Loaded previous team state from team_state.pkl")
+                if os.path.isdir(conversations_dir):
+                    candidates = [
+                        os.path.join(conversations_dir, f)
+                        for f in os.listdir(conversations_dir)
+                        if f.endswith("_latest.json")
+                    ]
+                    if candidates:
+                        resume_checkpoint = max(candidates, key=os.path.getmtime)
+                        print(f"✅ Found latest checkpoint: {resume_checkpoint}")
+                    else:
+                        print("⚠️  No checkpoints found in data/conversations. Starting a new team.")
+                else:
+                    print("⚠️  Conversations directory not found. Starting a new team.")
             except Exception as e:
-                print(f"⚠️  Failed to load saved team state: {e}. Initializing new team.")
-                _team_instance = None
-        else:
-            _team_instance = None
+                print(f"⚠️  Could not scan checkpoints: {e}. Starting a new team.")
 
-        if _team_instance is None:
-            _team_instance = ExpertTeam(
-                coordinator=coordinator,
-                experts=experts,
-                summary_agent=summary_agent,
-                max_messages=40,
-                debug=DEBUG_INTERNAL_DELIBERATION,
-                conversation_path="data/conversations",
-            )
-        
-        # Register Ctrl+C handler to save team state
-        def _save_state_handler(signum, frame):
-            if _team_instance is not None:
-                try:
-                    with open(state_path, "wb") as f:
-                        pickle.dump(_team_instance, f)
-                    print("\n💾 Team state saved to data/text_files/team_state.pkl")
-                except Exception as e:
-                    print(f"\n❌ Failed to save team state: {e}")
+        # Create team (optionally with resume checkpoint)
+        team = ExpertTeam(
+            coordinator=coordinator,
+            experts=experts,
+            summary_agent=summary_agent,
+            max_messages=40,
+            debug=DEBUG_INTERNAL_DELIBERATION,
+            conversation_path="data/conversations",
+            resume_checkpoint=resume_checkpoint,
+        )
+
+        # Register Ctrl+C handler to report latest checkpoint location
+        def _interrupt_handler(signum, frame):
+            try:
+                latest_path = os.path.join("data/conversations", f"{team.conversation_id}_latest.json")
+                print(f"\n💾 Progress is checkpointed to: {latest_path}")
+                print("   You can continue later using option 4 (Continue from where we left off).")
+            except Exception as e:
+                print(f"\n⚠️  Interrupt received but failed to compute checkpoint path: {e}")
             raise KeyboardInterrupt
 
-        signal.signal(signal.SIGINT, _save_state_handler)
-
-        team = _team_instance
+        signal.signal(signal.SIGINT, _interrupt_handler)
+        try:
+            signal.signal(signal.SIGTERM, _interrupt_handler)
+        except Exception:
+            pass
 
         png = team.team_graph.get_graph().draw_mermaid_png()
         
@@ -376,7 +396,7 @@ async def main():
         
         # Process a query
         query = risk_assessment_request 
-        response = await team.consult(query)
+        response = await team.consult(query, resume=resume_checkpoint is not None)
         
         if DEBUG_INTERNAL_DELIBERATION:
             print("\n" + "="*80)

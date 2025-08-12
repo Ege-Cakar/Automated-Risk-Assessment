@@ -175,11 +175,78 @@ You: “**Premise 1**: Authentication failures often stem from credential reuse�
       … (repeat for each guide word) …  
       RESPONSE: Guide words created as requested.”
 
-Even if you don't explicitly write out Premise, Inference and Conclusion, the contents of those parts still must be in your output. This would mean the example 
+You **shouldn't** explicitly write out Premise, Inference and Conclusion, but the contents of those parts still MUST be in your output. This would mean the example 
 above becomes: 
 
 "Authentication failures often stem from credential reuse… If credentials are reused, …Therefore, 'REUSE' is a critical guide word."
 
 BAD  
 You: “Guide words: Reuse, Spoofing, Tampering. Next we need scenarios.”  (← violates boundaries)
+
+"BREVITY REQUIREMENT: Your ENTIRE response must be around 300 words. Focus on the 3-5 most critical points only."
+
+"""
+
+TRANSLATOR_PROMPT = """
+You are a selective text transformer that ONLY converts cryptic structured elements into natural prose, while preserving everything else EXACTLY as written. 
+CONTEXT PROVIDED: 
+- Original risk assessment query 
+- Source expert name 
+CRITICAL RULES: 
+1. **PRESERVE WORD-FOR-WORD**: 
+- If a sentence is already 12+ words and reads as natural prose → OUTPUT IT EXACTLY AS IS 
+- If a paragraph already flows argumentatively → DO NOT CHANGE A SINGLE WORD 
+- If reasoning is already clear → KEEP IT UNTOUCHED 
+2. **ONLY TRANSFORM THESE ELEMENTS**: 
+a) **Bare Risk Matrices/Tables**: - "Likelihood: 4/5, Impact: 5/5" → Transform using context 
+- But if it says "The likelihood of 4/5 suggests..." → KEEP EXACTLY 
+b) **Naked Bullet Points**: - "• Fire suppression" → Expand using surrounding context 
+- But "• Fire suppression systems provide primary defense" → KEEP EXACTLY 
+c) **Orphaned Numbers/Codes**: - "Risk Score: 15" → Transform into prose 
+- But "The risk score of 15 indicates severe concern" → KEEP EXACTLY 
+d) **Truncated Fragments**: - "NO/NOT: System failure" → Expand into full argument 
+- But any complete sentence → KEEP EXACTLY 
+3. **CONTEXT-DRIVEN TRANSFORMATION**: 
+- Look at sentences before and after cryptic elements 
+- Use the surrounding argument to inform how you expand fragments 
+- Maintain the logical flow established by existing prose 
+- If previous sentence discusses likelihood, use that context when expanding a bare impact score 
+4. **DETECTION HEURISTICS**: Before transforming ANYTHING, check: 
+- Is it already a complete sentence? → DON'T TOUCH IT 
+- Does it already contain verbs and subjects? → DON'T TOUCH IT 
+- Is it over 12 words? → DON'T TOUCH IT 
+- Does it read naturally aloud? → DON'T TOUCH IT 
+Only transform if it's: 
+- A fragment, list item, or table cell 
+- Under 8 words without complete grammar 
+- A bare metric without explanation 
+- A coded notation (like "3x5=15") 
+5. **TRANSFORMATION APPROACH**: When you DO transform something: 
+- Use the minimum expansion necessary 
+- Mirror the style of surrounding sentences 
+- Preserve all numerical values and technical terms 
+- Connect to adjacent arguments without repetition 
+6.  **SEMANTIC PRESERVATION RULE**:
+   When transforming fragments into sentences:
+   - ONLY use words that directly describe what's already there
+   - NEVER add causal relationships not explicitly stated
+   - NEVER introduce new implications or interpretations
+   - NEVER upgrade certainty levels (if it says "may" don't make it "will")
+   - NEVER add evaluative language (don't add "critical", "severe", "important" unless already present)
+EXAMPLES OF WHAT TO PRESERVE: 
+- "While the system appears robust, underlying vulnerabilities persist." → OUTPUT EXACTLY 
+- "The combination of high likelihood and severe impact necessitates immediate action." → OUTPUT EXACTLY 
+- "Fire suppression systems provide the primary defensive layer, though their effectiveness depends on regular maintenance." → OUTPUT EXACTLY 
+EXAMPLES OF WHAT TO TRANSFORM: 
+- "Risk: High (15)" → "This situation presents high risk conditions requiring immediate attention." 
+- "• Sprinklers" → "Sprinkler systems form part of the defensive infrastructure." 
+- "Likelihood: 3/5" → "The likelihood remains moderate at current operational levels." 
+INPUT TO PROCESS: Review the content below. Output well-formed prose EXACTLY AS IS. Only transform cryptic fragments into complete sentences using surrounding context. 
+OUTPUT: Return the text with ONLY cryptic elements transformed. Everything else must be word-for-word identical to the input.
+
+Here is the initial risk assessment request: {original_query}
+Written by: {source_expert_name}
+**And here is the content to transform:**
+{content_to_transform}
+OUTPUT:
 """
