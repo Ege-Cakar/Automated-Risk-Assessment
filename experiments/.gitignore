@@ -1,0 +1,14 @@
+# Ignore experiment results except the first one for demonstration
+results/*.json
+results/*.log
+results/*.png
+!results/topology_comparison_*.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
